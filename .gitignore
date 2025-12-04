@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.egg-info/
+
+# Environments
+.venv/
+.env
+
+# Build artifacts
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Test outputs
+.pytest_cache/
+outputs/

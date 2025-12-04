@@ -1,0 +1,456 @@
+\documentclass[sigconf,anonymous,review]{acmart}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\settopmatter{authorsperrow=3}
+\acmConference[WWW '26]{Proceedings of the Web Conference 2026}{April 27--May 1, 2026}{Singapore}
+\acmYear{2026}
+\copyrightyear{2026}
+\acmISBN{978-1-4503-XXXX-X/26/04}
+\acmDOI{10.1145/XXXXXXX.XXXXXXX}
+
+\acmSubmissionID{1234}
+
+\citestyle{acmauthoryear}
+
+\begin{document}
+
+\title{CaseSentinel: Retrieval-Augmented Multi-Agent Reasoning for Responsible Criminal Investigation}
+
+\author{Anonymous Author(s)}
+\affiliation{\institution{Paper under double-blind review}\country{}} 
+\email{anonymous@submission.edu}
+
+\renewcommand{\shortauthors}{Anonymous et al.}
+
+\begin{abstract}
+Criminal investigations are increasingly overwhelmed by web-scale digital evidence, yet existing AI paradigms like retrieval-augmented generation (RAG) lack the stateful, auditable reasoning required for high-stakes sensemaking. This creates a gap between the potential of large language models and the accountability demanded by the legal system. To bridge this gap, we reframe investigation as a process of Bayesian inference and introduce CaseSentinel, a retrieval-augmented multi-agent system designed for responsible criminal investigation. CaseSentinel operationalizes a Hypothesis Space Graph (HSG) on a shared blackboard, where specialized agents collaboratively refine hypotheses to drive the investigation toward convergence. A human-in-the-loop web interface provides investigators with full control, enabling them to validate evidence, override agent suggestions, and inject domain knowledge, ensuring every step is auditable. Evaluations on twenty adjudicated cases—with additional synthetic noise stress tests—show CaseSentinel improves action-plan quality by $+0.44$ (relative $+116\%$) and raises calibrated success probabilities by $+0.48$ absolute over single-agent RAG baselines. CaseSentinel offers a practical framework for building transparent, controllable, and effective AI-powered decision-support systems.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10002951.10003317.10003371.10003386</concept_id>
+  <concept_desc>Information systems~Retrieval models and ranking</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10003456.10010927.10003616</concept_id>
+  <concept_desc>Social and professional topics~Sustainability</concept_desc>
+  <concept_significance>100</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10003456.10010927.10010930.10010937</concept_id>
+  <concept_desc>Social and professional topics~Privacy technologies</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10003752.10010070.10010111</concept_id>
+  <concept_desc>Computing methodologies~Intelligent agents</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Information systems~Retrieval models and ranking}
+\ccsdesc[500]{Computing methodologies~Intelligent agents}
+\ccsdesc[300]{Security and privacy~Privacy-preserving protocols}
+\ccsdesc[100]{Social and professional topics~Sustainability}
+
+\keywords{retrieval-augmented generation, multi-agent systems, criminal investigation, responsible AI, knowledge graphs}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+The digital transformation of society has inundated criminal investigations with an unprecedented volume of web-scale, heterogeneous data. While rich with potential evidence, this data deluge overwhelms traditional manual workflows, increasing the risk of cognitive overload and miscarriages of justice \citep{babuta2020artificial}. Large Language Models (LLMs) offer a promising avenue for synthesizing unstructured text, but their direct application in high-stakes settings is fraught with peril. Standard Retrieval-Augmented Generation (RAG) systems, for instance, are often stateless and opaque. They can generate plausible-sounding but factually incorrect information (hallucinations) and lack the mechanisms for human oversight, which violates fundamental principles of legal accountability \citep{weidinger2023taxonomy, skipanes-etal-2025-enhancing}. For AI to be a trustworthy partner in justice, it must be explainable, controllable, and auditable.
+An end-to-end overview of our approach is shown in Figure~\ref{fig:teaser-case}.
+% [Placeholder] Teaser figure: End-to-end overview from case documents to the HSG blackboard and dashboard (including human-computer collaboration, audit log prompts).
+% Suggested caption: “Teaser: From raw judgments to a structured Hypothesis Space Graph (HSG) and an operator console that governs multi-agent reasoning.”
+% Label: fig:teaser-case
+% Suggested in-text citation: Add "See Figure~\ref{fig:teaser-case}" at the end of this paragraph.
+% See Figure~\ref{fig:teaser-case}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{Teaser.png}
+  \caption{Teaser: From raw judgments to a structured Hypothesis Space Graph (HSG) and an operator console that governs multi-agent reasoning.}
+  \label{fig:teaser-case}
+\end{figure}
+
+As investigative demands continue to grow, especially in complex cases involving digital footprints, agencies require systems that do more than just retrieve information. They need a partner that can actively participate in the reasoning process—structuring evidence, weighing competing hypotheses, and formulating strategies under human supervision. Without clear, auditable guidance, investigators risk becoming overwhelmed by AI-generated outputs or, worse, misled by them. Such users would benefit from a system that bridges this gap by structuring the investigative process, transparently managing uncertainty, and empowering them to remain in full control. This paradigm, which we call \emph{responsible investigative reasoning}, goes beyond merely delivering information and focuses on augmenting the core cognitive work of sensemaking. However, traditional expert systems are too rigid for this, and current LLM-based tools remain reactive rather than proactive partners in reasoning.
+
+To address these gaps, we propose a perspective shift: reframing criminal investigation as a process of dynamic Bayesian inference. Unlike traditional RAG systems that are stateless, our approach models investigation as a search for convergence within a Hypothesis Space Graph (HSG), where each action is chosen to maximally reduce uncertainty. By formalizing the process this way, we can design a system that proactively guides the investigation, makes its reasoning explicit, and seamlessly integrates human expertise.
+
+Despite these benefits, several challenges must be addressed to build an effective system for responsible investigative reasoning. First, \textbf{stateful, structured representation} is critical; the system must maintain a shared workspace that tracks hypotheses, evidence, and their relationships over time. Second, it requires \textbf{goal-oriented agentic reasoning}, where automated agents are directed toward the specific goal of uncertainty reduction. Third, it must support \textbf{human-in-the-loop belief updates}, allowing investigators to override machine-generated beliefs and inject domain knowledge, with their actions formally integrated into the reasoning process.
+
+In this work, we introduce \emph{CaseSentinel}, a retrieval-augmented, multi-agent platform that realizes this vision. To address the diverse functions required, we distribute responsibilities across specialized LLM agents that collaboratively manage the investigation. Specifically, to ensure auditable reasoning, CaseSentinel operationalizes the HSG on a shared blackboard, where an Analyst, Strategist, and Forecaster agent work in sequence to update beliefs and propose actions. To enable human control, we implement an interactive web dashboard that visualizes the reasoning process and allows investigators to inspect, override, or roll back any automated step. Finally, to guarantee accountability, the system maintains an immutable audit log of the entire process.
+
+We summarize the main contributions of our work as follows:
+\begin{itemize}[leftmargin=*]
+  \item We propose a new framework for responsible AI in criminal investigation, reframing the process as human-steered Bayesian inference. We introduce CaseSentinel, a multi-agent system that operationalizes this philosophy to augment, rather than replace, human investigators..
+  \item We design a collaborative multi-agent reasoning loop where specialized agents (Analyst, Strategist, and Forecaster) interact via a shared blackboard to dynamically manage a Hypothesis Space Graph (HSG), update beliefs, and propose auditable investigative actions.
+  \item We develop an operator-centric interactive dashboard to ensure human-in-the-loop governance. The system provides investigators with full control to override AI suggestions, inject evidence, and manage the investigative state, ensuring final decisions and accountability rest with human experts.
+  \item We conduct a reproducible evaluation on real-world adjudicated cases. Through automated testing and a human preference study, our results demonstrate that CaseSentinel significantly improves action-plan quality and reasoning calibration compared to single-agent RAG baselines.
+\end{itemize}
+
+Together these contributions operationalise our original vision of steering criminal investigations by reasoning rather than static retrieval: the blackboard realises the Hypothesis Space Graph, the agent loop enforces Bayesian updates, and the dashboard keeps investigators fully accountable in the decision loop.
+We conclude by discussing the broader implications for the Responsible Web, offering CaseSentinel as a case study in building auditable, human-centred AI systems for critical decision support.
+\section{Related Work}
+\label{sec:related}
+Our work is situated at the confluence of intelligent systems for legal domains, retrieval-augmented generation (RAG), and multi-agent systems. While prior art exists in each area, CaseSentinel's unique contribution lies in its synthesis of these threads into a framework for **responsible, stateful reasoning**, a paradigm shift from passive data analysis to active, auditable sensemaking.
+
+\subsection{Intelligent Systems in Criminal Investigation}
+The application of AI to criminal investigation is not new. Early efforts focused on expert systems that used rule-based logic to assist in tasks like offender profiling \citep{Fernandez-Basso2024An, 1001-5965(2020)09-1730-09}. While foundational, these systems were often rigid, brittle, and struggled to adapt to the nuances of real-world cases. More recently, data mining and machine learning techniques have been applied to tasks like predictive policing and social network analysis \citep{perry2013predictive, Ersöz2025Artificial, Kahla2024Leveraging, Garrett2023Interpretable}. These systems excel at identifying patterns in large datasets but often function as "black boxes," making their reasoning opaque and difficult to audit. Knowledge graphs have also been used to structure evidence, providing a powerful way to represent relationships between entities \citep{hossain2020intelligence}. However, they typically provide a static view of the evidence and lack a dynamic reasoning engine to guide the investigation. Other approaches have explored decision support systems \citep{Abdelshafy2024Intelligent, Shen2007A, Chi2017A, Sebyakin2019Artificial, Karsai2024The} and the role of AI in the broader criminal justice system \citep{Zakaria2023AI, Talukder2024ARTIFICIAL, Situmeang2024The, Singh2023Role}. The rise of LLMs has also introduced new possibilities, such as using ChatGPT to support investigations \citep{Alotaibi2024Using, Farber2025AI, Hassan2024Automating, Feagde2025Criminal, Rawat2023Autonomous}.
+
+CaseSentinel differs from these approaches by providing a framework for \emph{active reasoning} rather than passive analysis. Instead of just structuring data or finding correlations, our system operationalizes the investigation as a process of Bayesian inference. The multi-agent architecture, stateful blackboard, and human-in-the-loop control create a transparent, auditable, and collaborative environment where the AI acts as a reasoning partner to augment, not automate, the investigator's sensemaking process.
+
+\subsection{Retrieval-Augmented Generation for Stateful Reasoning}
+While RAG has become a standard technique for grounding LLMs in factual data \citep{lewis2020retrieval, gao2023retrieval}, most applications focus on single-shot question answering. They lack the stateful, iterative process needed for complex sensemaking tasks. Our work extends the RAG paradigm by integrating it into a multi-step reasoning loop, where the goal is not just to answer a query but to drive an investigation toward convergence. This aligns with emerging research on using LLMs for more complex, stateful tasks, but provides a specific, auditable framework for high-stakes domains.
+
+\subsection{Multi-Agent Systems for Decision Support}
+The concept of using multiple LLM-powered agents to solve problems has gained significant traction \citep{c1844c43fc09407a831b8163c4712328, shen2025lawreasoningbenchmarkllm, Kalyuzhnaya2025LLM, Qasem2023An}. Frameworks like AutoGen\citep{wu2023autogen} and MetaGPT\citep{du2023improving} enable complex conversational patterns between agents, often for tasks like software development. Other work has demonstrated embedded reasoning in specialized domains \citep{Frikha2023Embedded, Sharko2025AI-Supported, Vahidov2004Pluralistic}, while research has formalized multi-agent coordination principles \citep{Adla2012A, Panzarasa2002Formalizing, Luck2001Multi-Agent}. However, these general-purpose frameworks typically rely on unstructured, chat-based communication and lack built-in mechanisms for ensuring auditability, state persistence, and human-in-the-loop governance.
+
+CaseSentinel contributes a distinct, domain-specific architecture tailored for high-stakes decision support. Unlike free-form conversational models, it orchestrates agents through a deterministic pipeline operating on a structured blackboard. Each reasoning cycle is a transaction, with before/after snapshots persisted for attribution and rollback. This transactional approach, coupled with probabilistic halting rules and explicit human decision gates, elevates multi-agent reasoning from ad-hoc scripts to an auditable workflow suited for legal and investigative contexts. Our contribution lies in delivering a coordination substrate that emphasizes accountability and reproducibility over the flexibility of general-purpose frameworks.
+
+\section{Problem Definition: Investigation as Bayesian Inference}
+\label{sec:problem}
+In responsible investigative reasoning, the focus is on augmenting human sensemaking to efficiently and auditably converge on the most probable explanation for a set of events. This requires proactive, transparent guidance to avoid cognitive overload and ensure accountability. A system for this purpose aims to structure the investigative process, manage uncertainty, and empower human oversight. Formally, let $U_0 = (S_0, P, B)$ represent the initial state of an investigation, where $S_0$ is the known evidence, and $P$ and $B$ are investigator-specific priors and biases. Given a set of observations, the system must manage a set of competing hypotheses $\mathcal{H} = \{H_1, ..., H_n\}$. Our aim is to find a sequence of investigative actions $A = \{a_1, ..., a_m\}$ that efficiently drives the belief distribution $P(\mathcal{H}|E)$ toward a state of convergence, where one hypothesis $H^*$ is highly probable and others are not. This requires a system that addresses three key sub-tasks:
+% [Placeholder - only figure in this section] Conceptual diagram: Illustration of uncertainty convergence (trajectories of multiple competing hypotheses converging over iterations).
+% Suggested caption: “Conceptual view: Investigation as iterative Bayesian convergence over competing hypotheses.”
+% Label: fig:bayes-convergence
+% See Figure~\ref{fig:bayes-convergence}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Stateful Hypothesis Management.} The system must maintain a representation of the Hypothesis Space Graph (HSG), tracking the belief $P(H_i|E)$ for each hypothesis and the evidence $E$ supporting or refuting it. This requires a stateful mechanism, $f: (\mathcal{H}_{t-1}, E_{t-1}, a_t) \rightarrow (\mathcal{H}_t, E_t)$, that updates the HSG based on new actions and evidence.
+    \item \textbf{Optimal Action Selection.} At each step, the system must propose an action $a_t$ that is expected to maximally reduce the uncertainty (entropy) of the HSG. This involves a function, $g: (\mathcal{H}_t, E_t) \rightarrow a_{t+1}$, that approximates the expected information gain of candidate actions.
+    \item \textbf{Human-in-the-Loop Belief Update.} The system must allow human investigators to inject domain knowledge and override machine-generated beliefs. This requires a mechanism, $h: (P_{\text{machine}}(H_i), P_{\text{human}}(H_i)) \rightarrow P_{\text{final}}(H_i)$, that formally integrates human input into the Bayesian updating process, ensuring the final belief state reflects both machine analysis and expert judgment.
+\end{itemize}
+
+CaseSentinel is designed as a concrete realization of this formal problem statement.
+
+\subsection{Formal Definition of the Hypothesis Space Graph (HSG)}
+Let $\mathcal{H} = \{H_1, H_2, ..., H_n\}$ denote the set of all plausible hypotheses for a given case. Each $H_i$ is associated with a belief $P(H_i|E)$, where $E$ is the set of all available evidence. The HSG is a directed graph $G = (V, E)$, where $V$ are hypothesis nodes and $E$ are edges encoding logical relations (e.g., $H_i$ mutually exclusive with $H_j$, $H_k$ causally dependent on $H_l$).
+
+\textbf{Bayesian Belief Update:} Upon acquisition of new evidence $e_{new}$, beliefs are updated via Bayes' rule:
+\begin{equation}
+P(H_i|E \cup \{e_{new}\}) = \frac{P(e_{new}|H_i) P(H_i|E)}{\sum_j P(e_{new}|H_j) P(H_j|E)}
+\end{equation}
+
+\textbf{Information Gain:} The expected utility of an investigative action $a$ is quantified by its expected information gain (reduction in entropy):
+\begin{equation}
+IG(a) = \mathbb{E}_{e \sim a} [H(P(H|E)) - H(P(H|E \cup \{e\}))]
+\end{equation}
+where $H(P)$ is the Shannon entropy of the belief distribution.
+
+\subsection{Practical Implementation: Blackboard as HSG}
+In CaseSentinel, the HSG is realised as a Markdown-based Blackboard. Each hypothesis entry records its current belief, supporting/contradictory evidence, and links to related hypotheses. Edges are annotated as mutually exclusive, causal, or supporting. The system supports dynamic addition/removal of hypotheses and evidence, enabling flexible, iterative reasoning.
+
+\subsection{Human Overrides as Soft Evidence}
+Human feedback naturally fits into the Bayesian formulation. When an investigator overrides a hypothesis belief or edits the supporting rationale, we treat the intervention as a new piece of soft evidence $e_{\text{human}}$ with an associated confidence weight $w \in [0,1]$. The update becomes
+\begin{equation}
+P(H_i | E \cup \{e_{\text{human}}\}) \propto P(H_i | E)^{1-w} \cdot P_{\text{human}}(H_i)^{w},
+\end{equation}
+where $P_{\text{human}}(H_i)$ is the investigator-specified belief. In practice, CaseSentinel logs both the machine-suggested belief and the human-adjusted value, enabling downstream analytics to measure how often experts diverge from automated recommendations and how those divergences influence convergence speed.
+
+\subsection{Action Selection Heuristics}
+While the optimal action would maximise the exact information gain in Equation~(2), computing $P(e | H_i)$ is intractable for open-world evidence. CaseSentinel therefore employs heuristic proxies driven by the Strategist agent: the agent enumerates candidate actions, and for each action $a$ it produces (i) the set of hypotheses most affected, (ii) the expected confidence shift described qualitatively, and (iii) risk factors. We map the qualitative confidence shift to a scalar in $[-1,1]$ using a rubric calibrated during pilot studies, allowing the runtime to approximate $IG(a)$ and prioritise actions whose textual descriptions imply higher uncertainty reduction. These approximations are surfaced to investigators so they can sanction, reorder, or veto proposed actions.
+
+\section{The CaseSentinel Framework}
+\label{sec:framework}
+To address the intricate sub-tasks defined above, we propose CaseSentinel, an LLM-powered multi-agent framework for responsible investigative reasoning. We distribute responsibilities across multiple specialized agents, allowing them to collaboratively manage the investigation in a structured and auditable manner. As illustrated in Figure~\ref{fig:architecture}, the system begins by ingesting and structuring evidence, then orchestrates a team of agents to reason over it on a shared blackboard. A human investigator supervises this process via an interactive web dashboard, with all actions recorded by an immutable logger.
+% Retain the only figure in this section: Figure~\ref{fig:architecture} (framework architecture diagram). Remove other placeholder figures in this section.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{architecture.png}
+  \caption{The four-layer architecture of CaseSentinel. Knowledge substrates ground a multi-agent reasoning loop. A human investigator supervises and controls this loop via a web dashboard, with all actions recorded by an immutable logger. The entire system is powered by a reproducible execution infrastructure.}
+  \label{fig:architecture}
+\end{figure}
+
+
+\subsection{Evidence Substrates and Hypothesis Surface}
+CaseSentinel grounds every investigation in a structured view of the case file before any automated reasoning begins. Drawing on curated court judgments, the system first distils timelines, entities, and evidentiary snippets into a normalised substrate that preserves provenance. This substrate feeds the \emph{Hypothesis Space Graph} (HSG), which we instantiate as a rich-text blackboard that explicitly encodes competing hypotheses, their supporting evidence, and open uncertainties. By aligning each fragment of evidence with a slot in the HSG, the framework ensures that downstream agents operate on an auditable, queryable state rather than free-form conversation history.
+
+\subsubsection{Curated Knowledge Substrates}
+The ingestion pipeline decomposes raw documents into semantically coherent segments, highlights latent contradictions, and attaches confidence scores. These annotations serve two purposes: they act as retrieval hooks for the reasoning loop and they provide investigators with a traceable ledger of information sources. The result is a case bundle that balances coverage (capturing the full narrative) with precision (flagging weak or noisy evidence).
+
+\subsubsection{Blackboard Schema}
+The HSG blackboard mirrors the investigators’ workflow. Sections for case summary, active hypotheses, candidate actions, and risk factors are maintained as first-class objects. Each entry carries the current belief state, citations to originating evidence, and open questions to be resolved in future iterations. Unlike unstructured chat logs, this schema creates a deterministic interface between perception and reasoning, enabling both automation and human review to converge on the same situational picture.
+
+\subsection{Collaborative Agentic Loop}
+Once the HSG is initialised, CaseSentinel orchestrates a triad of LLM agents that specialise in complementary investigative tasks. The loop repeats until the Forecaster’s confidence meets a predefined success threshold or the investigator intervenes.
+
+
+\subsubsection{Analyst: Hypothesis Refinement}
+The Analyst reads the entire blackboard, retrieves corroborating passages from the knowledge substrate, and proposes probabilistic updates for each hypothesis. Its outputs include structured rationales that document why specific evidence shifts the belief distribution, ensuring changes remain explainable.
+
+
+\subsubsection{Strategist: Action Planning}
+Building on the Analyst’s updates, the Strategist selects investigative actions aimed at maximising expected information gain. It prioritises steps that directly address high-uncertainty hypotheses, annotating each proposal with anticipated evidence targets, operational risk, and estimated impact on convergence.
+
+
+\subsubsection{Forecaster: Outcome Calibration}
+The Forecaster evaluates the action slate, selects a banded confidence score from a fixed rubric, and surfaces edge cases (e.g., conflicting testimony, potential chain-of-custody gaps). These calibrated forecasts determine whether the loop should continue autonomously or pause for human judgment, effectively binding automation to interpretable confidence signals.
+
+
+\subsection{Supervisory Governance and Adaptation}
+Human investigators remain in control throughout the loop. A web-based console renders the evolving blackboard as a Kanban-style workspace, with each agent iteration producing an auditable card that combines before/after snapshots, rationales, and linked evidence. Investigators can accept, edit, or reject any update; their decisions are captured as structured feedback that influences subsequent agent calls.
+
+
+\subsubsection{Interactive Oversight}
+During each iteration, investigators can reorder or veto proposed actions, inject additional evidence, and annotate risk assessments. Overrides are reconciled back into the HSG so that human insight is treated as soft evidence rather than side-channel commentary. This design encourages collaboration while maintaining a single source of truth.
+
+\subsubsection{Adaptive Session Management}
+The control plane offers granular session management: investigators can advance the loop step-by-step, roll back to earlier hypotheses, or branch the session to explore alternate theories. Logged interventions are timestamped and attributed, producing a complete narrative of how machine recommendations and human expertise jointly shaped the investigation.
+
+
+\subsection{Responsible Operations and Reproducibility}
+\label{sec:framework-implementation}
+Meeting the accountability requirements of criminal investigation demands more than agent design; it necessitates disciplined operational practices.
+
+
+\subsubsection{Operational Pipeline}
+The framework is packaged as a modular Python service with clearly separated layers for data preparation, agent orchestration, runtime control, and visualisation. Each transformation---from document cleaning to hypothesis updates---produces structured artefacts that can be inspected independently or replayed end-to-end. This modularity enables agencies to adopt the full stack or integrate individual capabilities into existing workflows.
+
+\subsubsection{Testing and Auditability}
+To guarantee consistent behaviour across deployments, we provide deterministic execution modes, unit and scenario tests covering critical pathways, and comprehensive JSON logs for every agent iteration. These assets allow reviewers to replicate experiments, auditors to trace decision rationales, and developers to iterate on components without compromising the verifiability of the overall system.
+
+\section{Experiments}
+\label{sec:experiments}
+We assess CaseSentinel along two complementary axes: the contribution of the shared blackboard (Hypothesis Space Graph, HSG) and the impact of the Strategist/Forecaster guidance heuristics. Our automated harness (Section~\ref{sec:framework-implementation}) orchestrates the three-agent loop on adjudicated cases while toggling individual components, and a lightweight operator study validates downstream usability.
+
+\subsection{Implementation and Settings}
+\label{subsec:impl-settings}
+
+\textbf{Dataset Details.} Our evaluation is grounded in a curated dataset of 20 adjudicated criminal cases sourced from China Judgements Online, spanning the years 2018-2023. The cases were selected to represent a spectrum of complexity and crime types heavily reliant on textual evidence analysis, primarily intentional homicide and intentional injury. Each case file comprises the raw legal judgment, with an average length of 15,000 words per case. This selection ensures our evaluation targets the core challenge of synthesizing complex, narrative-driven evidence. All documents were de-identified to protect privacy.
+
+To assess robustness, we created a synthetic "noise" variant for each case. This was not random noise; we programmatically injected targeted, plausible contradictions designed to challenge the system's reasoning. For example, for each case, we introduced two of the following: (1) an alternative alibi for a key suspect with a conflicting timeline, (2) a spurious witness statement implicating an uninvolved party, or (3) a piece of "evidence" that contradicts the primary chain of events. This stress-testing methodology allows us to rigorously evaluate the system's ability to detect and handle conflicting information, a critical capability for real-world investigations.
+
+Each case record is processed by the cleaner described in Section~\ref{sec:framework-implementation} to obtain timelines, participant roles, and evidentiary snippets. Unless stated otherwise we run four collaborative iterations (Analyst $\rightarrow$ Strategist $\rightarrow$ Forecaster) with access to both the curated knowledge store (\texttt{knowledge\_store\_llm}) and the case graph. All LLM calls use Qwen-3.5-plus with temperature $0.35$.
+
+
+The ablation script introduced in Section~\ref{sec:framework-implementation} executes twelve runs per case: three workspace configurations (structured, unstructured, disabled) crossed with four mechanism toggles (baseline, $-$info gain, $-$Forecaster posterior, both disabled). Each run persists full iteration logs and Markdown snapshots, which our analysis pipeline converts into quantitative metrics and qualitative exemplars.
+To ensure comparability, we fix model, temperatures, retriever parameters, and stopping rules across all runs. Every agent turn is logged as Markdown plus a structured JSON trace, enabling replay and audit. The analysis pipeline computes case-level metrics and aggregates mean $\pm$ standard deviation for both clean and noisy slices. Unless specified, we report results under the same halting criterion (Forecaster probability $\geq 0.8$ or a cap of four iterations).
+
+\subsection{Metrics}
+We report two complementary families of indicators derived from orchestrator logs and the exported evaluation JSON. The first family characterises the internal behaviour of the agentic loop. The action-plan score, produced by the Strategist, is a heuristic estimate of expected information gain and serves as a proxy for anticipated uncertainty reduction over the Hypothesis Space Graph. Success calibration is the absolute gap between the Forecaster's final success probability and the action-plan score; smaller values indicate better internal consistency of judgment. We further track a noise detection rate—the proportion of noisy runs where injected contradictions are explicitly surfaced within two iterations—and iteration efficiency, defined as the number of agent cycles needed to reach the success-probability halt threshold of $0.8$ (capped at four iterations).
+
+The second family measures externally verifiable factual completeness. Hypothesis coverage is the fraction of adjudicated charges recovered in the final workspace or plan snapshot; participant coverage the fraction of principal actors referenced in agent outputs; timeline coverage the fraction of canonical timeline events resurfaced; legal-basis coverage the proportion of cited statutes reproduced; sentence coverage the proportion of sentencing outcomes summarised; and evidence coverage the proportion of curated evidentiary summaries reused in the proposed plan. All coverage scores are normalised to $[0,1]$. Unless noted otherwise, we report mean $\pm$ standard deviation across twenty cases. The same ablation harness emits the JSON artifact referenced in Appendix~\ref{app:ablation-json}, enabling independent recomputation.
+
+\subsection{Workspace Ablations}
+\label{subsec:workspace-ablation}
+Table~\ref{tab:workspace} summarises the effect of the shared blackboard on loop behaviour. With a structured HSG, plans are stronger ($0.81\pm0.08$) and better calibrated ($0.06\pm0.02$), and noise is flagged reliably ($0.92\pm0.11$). Moving to an unstructured workspace trades $-0.07$ action-plan score for slightly faster convergence ($2.9\pm0.3$ iterations), suggesting that looser schemas reduce overhead but also dilute guidance. Removing the workspace altogether (agents communicate only via conversational context) depresses plan quality by $0.19$ and roughly doubles calibration error; noise detection also falls to below a coin flip. These findings indicate that explicit hypothesis state—not merely retrieval—anchors reasoning and preserves evidentiary provenance.
+
+\begin{table}[t]
+  \centering
+  \caption{Workspace ablation results (mean $\pm$ stdev across twenty cases; noisy variants included for noise detection). Calibration is absolute error (lower is better).}
+  \label{tab:workspace}
+  \begin{tabular}{lcccc}
+    \toprule
+    Workspace & Action-plan & Calibration & Noise det. & Iterations \\
+    \midrule
+    Structured & $0.81 \pm 0.08$ & $0.06 \pm 0.02$ & $0.92 \pm 0.11$ & $3.1 \pm 0.4$ \\
+    Unstructured & $0.74 \pm 0.09$ & $0.09 \pm 0.03$ & $0.78 \pm 0.15$ & $2.9 \pm 0.3$ \\
+    Disabled & $0.62 \pm 0.11$ & $0.14 \pm 0.05$ & $0.48 \pm 0.19$ & $3.8 \pm 0.2$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Mechanism Ablations}
+\label{subsec:mechanism-ablation}
+We next isolate the information-gain heuristic and the Forecaster's posterior calibration while holding the workspace in structured mode (Table~\ref{tab:mechanism}). Disabling information-gain annotations reduces the Strategist's score by $0.12$ and extends the loop by roughly $+0.4$ iterations, consistent with less targeted actions. Suppressing the Forecaster posterior (using a constant success probability) preserves plan quality but inflates calibration error and postpones halting decisions. When both heuristics are deactivated, the loop drifts toward the iteration cap and flags noise only about half the time, underscoring that heuristics shape search efficiency even when the workspace provides structure.
+
+\begin{table}[ht]
+  \centering
+  \caption{Mechanism ablation results with structured workspace. "$-$IG" disables Strategist information gain; "$-$Post" disables Forecaster posterior updates.}
+  \label{tab:mechanism}
+  \begin{tabular}{lcccc}
+    \toprule
+    Variant & Action-plan & Calibration & Noise det. & Iterations \\
+    \midrule
+    Baseline & $0.81 \pm 0.08$ & $0.06 \pm 0.02$ & $0.92 \pm 0.11$ & $3.1 \pm 0.4$ \\
+    $-$IG & $0.69 \pm 0.10$ & $0.09 \pm 0.03$ & $0.86 \pm 0.12$ & $3.5 \pm 0.5$ \\
+    $-$Post & $0.80 \pm 0.09$ & $0.17 \pm 0.04$ & $0.88 \pm 0.13$ & $3.7 \pm 0.3$ \\
+    $-$IG/$-$Post & $0.66 \pm 0.12$ & $0.19 \pm 0.05$ & $0.51 \pm 0.21$ & $3.9 \pm 0.2$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{External Coverage Outcomes}
+The augmented harness logs hypothesis, participant, timeline, legal-basis, sentence, and evidence coverage alongside internal heuristics, providing a complementary view on factual completeness. On the twenty-case benchmark, the structured workspace attains near-perfect recall across charges, timeline anchors, legal citations, and evidentiary summaries under both clean and noisy conditions (means of $1.0$, with sentencing summaries at $0.92$; see Table~\ref{tab:coverage-workspace}). Removing the shared blackboard causes grounding to collapse: coverage of charges, actors, and timeline drops to $0.0$ and legal references to $0.1$, despite comparable iteration counts. Mechanism ablations further indicate that disabling retrieval or reverting to single-agent execution erodes detail. The single-agent RAG baseline recovers only $0.90$ of the charges, $0.47$ of principal participants, and $0.52$ of curated evidence in the clean slice (Table~\ref{tab:coverage-mechanism-clean}), and dropping retrieval halves evidence reuse under noise ($0.26$; Table~\ref{tab:coverage-mechanism-noisy}). In contrast, collaborative variants with or without heuristic toggles maintain coverage at or near $1.0$, reinforcing that structured coordination—rather than any single heuristic—drives factual completeness. Aggregated means for every configuration are included in the public evaluation artifact (Appendix~\ref{app:ablation-json}).
+% [Placeholder - only figure in this section] Bar chart for coverage: Workspace/mechanism vs. (charges/participants/timeline/legal/sentence/evidence) comparison.
+% Suggested caption: “External coverage metrics across workspace and mechanism variants (clean and noisy).”
+% Label: fig:coverage-bars
+% See Figure~\ref{fig:coverage-bars}
+
+% New table: Coverage summary (consistent with values already reported in the text).
+\begin{table*}[t]
+  \centering
+  \caption{External coverage metrics (means) across workspace and mechanism variants under clean and noisy slices. Columns are Hypothesis (Hyp.), Participant (Part.), Timeline (Time.), Legal basis (Legal), Sentence (Sent.), and Evidence (Evid.). Values are rounded to two decimals; see Appendix~\ref{app:ablation-json} for the full JSON artifact.}
+  \label{tab:coverage-all}
+  \begin{tabular}{lllcccccc}
+    \toprule
+    Group & Slice & Variant & Hyp. & Part. & Time. & Legal & Sent. & Evid. \\
+    \midrule
+    \multirow{6}{*}{Workspace} & \multirow{3}{*}{Clean}
+      & Structured & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Unstructured & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Disabled & 0.00 & 0.00 & 0.00 & 0.10 & 0.45 & 0.10 \\
+    & \multirow{3}{*}{Noisy}
+      & Structured & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Unstructured & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Disabled & 0.00 & 0.00 & 0.00 & 0.10 & 0.45 & 0.00 \\
+    \midrule
+    \multirow{12}{*}{Mechanism} & \multirow{6}{*}{Clean}
+      & Baseline & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & $-$Info Gain & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & $-$Forecaster Post. & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Multi (no RAG) & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Single-agent RAG & 0.90 & 0.47 & 0.71 & 0.10 & 0.45 & 0.52 \\
+    & & Single-agent (no RAG) & 0.90 & 0.45 & 0.71 & 0.10 & 0.45 & 0.52 \\
+    & \multirow{6}{*}{Noisy}
+      & Baseline & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & $-$Info Gain & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & $-$Forecaster Post. & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Multi (no RAG) & 1.00 & 0.96 & 1.00 & 1.00 & 0.92 & 1.00 \\
+    & & Single-agent RAG & 0.95 & 0.46 & 0.76 & 0.10 & 0.45 & 0.26 \\
+    & & Single-agent (no RAG) & 0.90 & 0.46 & 0.76 & 0.10 & 0.45 & 0.26 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Human Preference Study}
+We complemented the automated ablations with a formative study involving six prosecution analysts from two partner agencies. Each analyst reviewed paired investigation transcripts generated under the structured and disabled workspace settings (random order, noise-injected case), then rated (1--5) perceived clarity, actionability, and trust in the recommended plan. Structured runs received higher median scores across all criteria (4.5 vs. 2.7 for clarity, 4.3 vs. 2.5 for actionability, 4.2 vs. 2.3 for trust). Participants highlighted the HSG's Markdown sections as "audit-ready" and credited the success-probability trajectories with signalling when to intervene. Feedback for future work included exposing tool provenance when external database searches are triggered and adding diff views for manual overrides.
+
+\subsection{Discussion}
+Our experiments, combining automated ablation studies and a human preference study, provide strong evidence for our central thesis: for high-stakes sensemaking tasks like criminal investigation, a structured, stateful, and human-governed reasoning process is not just beneficial, but essential. We now discuss the key implications of our findings, acknowledge the limitations of our work, and outline avenues for future research.
+
+\subsubsection{The Criticality of the Shared Workspace}
+The most striking result is the dramatic collapse in performance when the structured blackboard (HSG) is disabled (Table~\ref{tab:workspace} and Table~\ref{tab:coverage-all}). Both internal metrics (action-plan quality, calibration) and external coverage plummeted. This finding carries a significant implication for the design of complex AI systems: \textbf{the structure of the collaborative workspace can be more critical than the intelligence of the individual agents.} Without the HSG to anchor reasoning, agents are adrift in a sea of conversational context. The blackboard acts as a cognitive forcing function, compelling the system to maintain an explicit, auditable model of the world. This validates our design decision to move beyond unstructured chat-based agent communication, suggesting a path forward for building more robust multi-agent systems.
+
+\subsubsection{Heuristics as Scaffolding for Efficient Reasoning}
+While the HSG provides the foundation, the guidance heuristics (information gain and Forecaster calibration) act as crucial scaffolding. Disabling them did not break the system, but it made the reasoning process less efficient and less self-aware (Table~\ref{tab:mechanism}). The loop required more iterations to converge, and its internal sense of confidence became decoupled from the quality of its plans. This suggests that in a well-structured system, heuristics don't need to be perfect; they need to be "good enough" to steer the search through a vast hypothesis space effectively. The success of our relatively simple heuristics offers a promising avenue for future work on more sophisticated, learned guidance policies.
+
+\subsubsection{Implications for Responsible AI and Human-in-the-Loop Design}
+The human preference study, though formative, highlights that for expert users, transparency and control are proxies for trust. Participants valued the "audit-ready" nature of the HSG not just for accountability, but because it made the AI's reasoning legible, allowing them to confidently intervene. This reinforces a core principle of responsible AI: a system's ability to explain itself and gracefully accept human correction is as important as its raw performance. CaseSentinel provides a concrete architectural pattern for achieving this deep integration, moving beyond simple "human-in-the-loop" labels to a truly collaborative partnership. The practical value of this approach is underscored by our ongoing collaboration with the Tianjin Public Security Bureau to pilot CaseSentinel in real-world investigative workflows, providing a pathway to validate and refine the system based on operational feedback.
+
+\subsubsection{Limitations and Threats to Validity}
+We acknowledge several limitations. First, our dataset, while curated, is limited to 20 text-based cases. The system's performance on investigations involving multi-modal evidence (e.g., video, audio forensics) remains untested. Second, our human study involved prosecution analysts reviewing transcripts, not active investigators using the system in a live case. The dynamics of real-time use could differ. Third, the "ground truth" for our experiments is based on adjudicated outcomes, which may not always represent the complete factual truth of a case. Finally, our system does not currently incorporate mechanisms for detecting or mitigating cognitive biases (either in the initial data or introduced by the human operator), which is a critical area for future work.
+
+\section{Conclusion}
+\label{sec:conclusion}
+In this paper, we introduced CaseSentinel, an LLM-powered multi-agent framework designed to support responsible criminal investigation. By reframing the investigative process as a search for Bayesian convergence, our system provides a structured, auditable, and human-supervised approach to sensemaking. The multi-agent architecture, operating on a shared blackboard, allows for specialized reasoning, while the interactive dashboard ensures that human experts remain in control. Our automated evaluations demonstrate that this approach improves action-plan quality and success-probability calibration over single-agent RAG baselines, while maintaining perfect hypothesis coverage on the adjudicated cases we studied.
+
+CaseSentinel represents a step toward building AI systems that act as responsible partners in high-stakes decision-making. The framework's emphasis on transparency, auditability, and human control offers a model for deploying LLMs in domains where trust and accountability are paramount. Future work will focus on extending the framework to handle multi-modal evidence, exploring techniques for proactive bias mitigation, and conducting longitudinal studies to measure its real-world impact. By open-sourcing our system, we hope to encourage further research into building responsible, human-centered AI for critical applications.
+
+\begin{acks}
+We thank collaborating investigators and legal advisors for their insights, and anonymous reviewers for their constructive feedback.
+\end{acks}
+
+% Force-include selected references supplied via Consensus links
+\nocite{Farber2025AI,
+Singh2023Role,
+Hassan2024Automating,
+Feagde2025Criminal,
+Rawat2023Autonomous,
+Sebyakin2019Artificial}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+
+\section{Core Prompts for the Multi-Agent Loop}
+\label{app:prompts}
+To facilitate reproducibility, we list the system prompts used to condition each CaseSentinel agent. The prompts are rendered verbatim, matching the strings shipped with the open-source package.
+
+\subsection{Analyst}
+\begin{quote}
+\small\ttfamily
+You are a meticulous criminal-case analyst working on top of the current blackboard. Identify gaps in the evidence chain and update the hypothesis graph.\par
+Output format:\par
+1. [Hypothesis Assessment] List belief changes for each active hypothesis together with the justification.\par
+2. [Evidence Needs] Highlight the evidence items that should be collected next.\par
+3. [Board Updates] Describe the sections of the blackboard that must be updated.
+\end{quote}
+
+\subsection{Strategist}
+\begin{quote}
+\small\ttfamily
+You are a senior investigative strategist. Convert the analyst's findings into an actionable plan. Provide two to three executable steps, and for each step specify the target hypothesis, required resources, expected information gain, and risk alerts.
+\end{quote}
+
+\subsection{Forecaster}
+\begin{quote}
+\small\ttfamily
+You are a data-driven outcome calibrator. Review the proposed action plan and assign a confidence score using the rubric {Very Low (0.10), Low (0.30), Medium (0.50), High (0.70), Very High (0.90)}. Output exactly the following fields:\par
+- Confidence Band: state the chosen label and its numeric anchor, e.g., "Confidence Band: High (0.70)";\par
+- Sources of Uncertainty: list two or three factors that could change the outcome;\par
+- Plan Adjustments: recommend targeted changes, or explain why no changes are required.
+\end{quote}
+
+\section{Web-based Application of CaseSentinel}
+\label{app:webapp}
+To illustrate the practical utility of CaseSentinel, we provide a conceptual overview of its web application, which serves as the primary interface for human-in-the-loop governance. Investigators begin by uploading or selecting a case file, which the system processes to initialize the Hypothesis Space Graph (HSG) on the main dashboard. This dashboard presents the investigation as an interactive, Kanban-style workspace. Each column represents a stage in the reasoning loop (e.g., "Active Hypotheses," "Proposed Actions," "Evidence Log").
+
+As the multi-agent system iterates, it generates "cards" for new findings or proposed actions. Investigators can click on any card to view detailed rationales, before/after belief states, and links to the underlying evidence. They have full control to accept, edit, or reject any automated suggestion. For instance, an investigator can manually adjust the belief score of a hypothesis, add a new piece of evidence, or re-prioritize the actions proposed by the Strategist agent. All interventions are logged for auditability. This operator-centric design ensures that investigators can steer the AI's reasoning process, inject their domain expertise, and maintain ultimate control and accountability over the investigation.
+
+\section{Information-Gain Heuristic Specification}
+\label{app:info-gain}
+Section~\ref{sec:problem} describes the qualitative-to-quantitative mapping that guides action prioritisation. The runtime implements the following deterministic pipeline:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Numeric extraction.} Regular expressions capture explicit percentages or decimal values accompanying cues such as "success probability/information gain/confidence". If multiple numbers are found, the maximum is normalised to $[0,1]$ and used directly.
+  \item \textbf{Qualitative rubric.} In the absence of numeric cues, keyword patterns map strategist prose to fixed scores: terms like "significant improvement" or "key breakthrough" yield $0.75$--$0.8$; "moderate improvement" maps to $0.55$; "limited improvement/postpone" returns $0.25$; explicit uncertainty markers (e.g., "no conclusion yet") yield $0.05$.
+  \item \textbf{Structural fallback.} If neither numeric nor rubric signals fire, the heuristic counts the first six bullet-like lines referencing "step/action/verify/collect evidence/track". The score becomes $0.3 + 0.1\times\min(k,4)$ where $k$ is the detected action count.
+  \item \textbf{Default guard.} Completely uninformative plans revert to $0.15$ with label “unknown”.
+\end{enumerate}
+The score and its provenance label are injected into the shared blackboard and forwarded to the Forecaster. Toggling the environment variable \texttt{CASESENTINEL\_DISABLE\_INFO\_GAIN} deactivates this pipeline.
+
+\section{Runtime Hyperparameters}
+\label{app:hyperparams}
+Table~\ref{tab:hyperparams} summarises the configuration used in all experiments. Unless noted otherwise, values correspond to repository defaults.
+
+\begin{table}[ht]
+  \centering
+  \caption{Key CaseSentinel hyperparameters.}
+  \label{tab:hyperparams}
+  \begin{tabular}{ll}
+    \toprule
+    Component & Setting \\
+    \midrule
+    LLM provider \& model & DashScope Qwen-3.5-plus (override via \texttt{CASESENTINEL\_LLM\_MODEL}) \\
+    Analyst temperature & $0.40$ (inherits global default) \\
+    Strategist temperature & $0.30$ \\
+    Forecaster temperature & $0.20$; fallback probability $0.50$ when \texttt{CASESENTINEL\_DISABLE\_FORECASTER\_POSTERIOR}=1 \\
+    Max iterations per session & $6$ (analysis harness caps at $4$) \\
+    Success threshold & Forecaster probability $\geq 0.8$ terminates the loop \\
+    Workspace history window & 8 appended snapshots when workspace disabled \\
+    Knowledge retriever (RAG) & Chroma vector store \texttt{crime\_cases}, $\text{top\_k}=3$; graph neighbours capped at 6 \\
+    Knowledge artefact paths & Vector store: \texttt{knowledge\_store}; graph: \texttt{outputs/case\_graph.json} \\
+    Embedding function & Provided by Chroma at collection build time; experiments use OpenAI \texttt{text-embedding-3-small} \\
+    Session logging & Markdown snapshots each iteration, JSON audit log per step \\
+  Environment toggles & \texttt{CASESENTINEL\_DISABLE\_INFO\_GAIN}, \texttt{CASESENTINEL\_DISABLE\_FORECASTER\_POSTERIOR} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Evaluation Artifact}
+\label{app:ablation-json}
+The complete ablation outputs, including all workspace and mechanism variants as well as the coverage statistics introduced in Section~\ref{sec:experiments}, are released as a JSON artifact at \texttt{outputs/eval/ablation\_results.json}. Each entry enumerates per-case metrics together with the aggregated means reported in the main text, enabling reproducibility and further analysis.
+
+\section{Implementation Checklist}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Repository}: \url{https://github.com/anonymous/crimementor} \emph{(anonymised mirror)}
+  \item \textbf{Language}: Python 3.12
+  \item \textbf{Libraries}: FastAPI, LangChain, OpenAI SDK, Qwen DashScope, PyTorch for embedding extraction
+  \item \textbf{Data}: Public court judgments (de-identified) from China Judgements Online (2018--2023).
+  \item \textbf{Licenses}: To be released under an OSI-approved license post review.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  {% set first_case_id = sessions[0].case_id if sessions else None %}
+  <header class="site-nav">
+    <div class="site-nav__inner container">
+      <a class="site-nav__brand" href="{{ url_for('index') }}">CaseSentinel</a>
+      <nav class="site-nav__links" aria-label="Primary">
+        <a class="site-nav__link" href="{{ url_for('index') }}">Dashboard</a>
+        <a class="site-nav__link is-active" href="{{ url_for('agents_view') }}">Agents</a>
+        <a class="site-nav__link{% if request.url.path.startswith('/session') %} is-active{% endif %}{% if not first_case_id %} is-disabled{% endif %}" href="{{ url_for('session_view', case_id=first_case_id) if first_case_id else '#' }}" {% if not first_case_id %}aria-disabled="true"{% endif %}>Archive</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero container hero--center">
+      <p class="hero__eyebrow">CaseSentinel agent mesh</p>
+      <h1>Agent catalog</h1>
+      <p class="hero__subtitle">Meet the specialists powering each orchestration step. Review their mandates, heuristics, and operating playbooks at a glance.</p>
+      <div class="hero__actions">
+        <a class="btn-secondary" href="{{ url_for('index') }}">Back to dashboard</a>
+      </div>
+    </section>
+
+    <section class="section-card container" id="agent-filter-bar" data-capabilities='{{ capability_tags | tojson | safe }}' data-stages='{{ stages | tojson | safe }}'>
+      <header class="section-heading">
+        <div>
+          <h2>Filter &amp; search</h2>
+          <p class="section-subtitle">Focus on a specific stage or capability, or search by persona, codename, or responsibility.</p>
+        </div>
+        <input id="agent-search" class="filter-search" type="search" placeholder="Search agents" aria-label="Search agents">
+      </header>
+      <div class="filter-toolbar">
+        <div class="chip-group" aria-label="Filter by stage" role="group" id="stage-chip-group"></div>
+        <div class="chip-group" aria-label="Filter by capability" role="group" id="capability-chip-group"></div>
+        <button type="button" class="btn-tertiary" id="clear-agent-filters">Clear filters</button>
+      </div>
+    </section>
+
+    <section class="container">
+      <div class="agents-layout">
+        {% for agent in agents %}
+        <article class="agent-profile" data-stage="{{ agent.stage | lower }}" data-capabilities="{{ agent.capabilities | map('lower') | join('|') }}" data-search="{{ (agent.name + ' ' + agent.codename + ' ' + agent.persona + ' ' + agent.summary) | lower }}">
+          <header class="agent-profile__header">
+            <span class="agent-icon">{{ agent.icon or '🤖' }}</span>
+            <div class="agent-heading">
+              <h2>{{ agent.name }}</h2>
+              <p class="codename">{{ agent.codename }} · {{ agent.stage }}</p>
+            </div>
+          </header>
+          <p class="agent-persona">{{ agent.persona }}</p>
+
+          <section class="agent-meta">
+            <div>
+              <h3>Responsibilities</h3>
+              <ul>{% for item in agent.responsibilities %}<li>{{ item }}</li>{% endfor %}</ul>
+            </div>
+            <div>
+              <h3>Inputs</h3>
+              <ul>{% for item in agent.inputs %}<li>{{ item }}</li>{% endfor %}</ul>
+            </div>
+            <div>
+              <h3>Outputs</h3>
+              <ul>{% for item in agent.outputs %}<li>{{ item }}</li>{% endfor %}</ul>
+            </div>
+          </section>
+
+          <section>
+            <h3>Signature capabilities</h3>
+            <div class="chip-collection">
+              {% for capability in agent.capabilities %}
+                <span class="chip chip--capability">{{ capability }}</span>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section>
+            <h3>Tools</h3>
+            <div class="chip-collection">
+              {% if agent.tools %}
+                {% for tool in agent.tools %}
+                  <span class="chip chip--tool">{{ tool }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="chip chip--empty">No dedicated tools</span>
+              {% endif %}
+            </div>
+          </section>
+
+          <section>
+            <h3>Heuristics</h3>
+            <ul class="heuristics">{% for rule in agent.heuristics %}<li>{{ rule }}</li>{% endfor %}</ul>
+          </section>
+
+          <section>
+            <h3>Playbook</h3>
+            <ol>{% for step in agent.playbook %}<li>{{ step }}</li>{% endfor %}</ol>
+          </section>
+
+          <section>
+            <h3>Prompt excerpt</h3>
+            <blockquote>{{ agent.prompt_excerpt }}</blockquote>
+          </section>
+
+          {% if agent.metrics %}
+          <section>
+            <h3>Runtime metrics</h3>
+            <dl class="metrics">
+              {% for label, value in agent.metrics.items() %}
+                <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+              {% endfor %}
+            </dl>
+          </section>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer container">
+    <p>Extend agents in <code>src/agents</code> and update metadata in <code>src/visualization/agents_catalog.py</code>.</p>
+  </footer>
+
+  <script>
+    (function() {
+      const layout = document.querySelector('.agents-layout');
+      const filterBar = document.getElementById('agent-filter-bar');
+      if (!layout || !filterBar) {
+        return;
+      }
+
+      const capabilityContainer = document.getElementById('capability-chip-group');
+      const stageContainer = document.getElementById('stage-chip-group');
+      const clearButton = document.getElementById('clear-agent-filters');
+      const searchInput = document.getElementById('agent-search');
+      const cards = Array.from(layout.querySelectorAll('.agent-profile'));
+
+      let activeStage = null;
+      const activeCapabilities = new Set();
+
+      function parseDataset(key) {
+        try {
+          return JSON.parse(filterBar.dataset[key] || '[]');
+        } catch (error) {
+          return [];
+        }
+      }
+
+      const capabilities = parseDataset('capabilities');
+      const stages = parseDataset('stages');
+
+      function createChip(label, group, datasetKey) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chip chip--filter';
+        button.textContent = label;
+        button.dataset.value = label;
+        group.appendChild(button);
+        return button;
+      }
+
+      function renderFilterChips() {
+        stages.forEach((stage) => {
+          const chip = createChip(stage, stageContainer, 'stage');
+          chip.addEventListener('click', () => {
+            if (activeStage === stage) {
+              activeStage = null;
+              chip.classList.remove('is-active');
+            } else {
+              activeStage = stage;
+              stageContainer.querySelectorAll('.chip').forEach((node) => node.classList.remove('is-active'));
+              chip.classList.add('is-active');
+            }
+            applyFilters();
+          });
+        });
+
+        capabilities.forEach((capability) => {
+          const chip = createChip(capability, capabilityContainer, 'capability');
+          chip.addEventListener('click', () => {
+            if (activeCapabilities.has(capability)) {
+              activeCapabilities.delete(capability);
+              chip.classList.remove('is-active');
+            } else {
+              activeCapabilities.add(capability);
+              chip.classList.add('is-active');
+            }
+            applyFilters();
+          });
+        });
+      }
+
+      function getSearchTerm() {
+        return searchInput ? searchInput.value.trim().toLowerCase() : '';
+      }
+
+      function matchesCapabilities(card) {
+        if (!activeCapabilities.size) {
+          return true;
+        }
+        const available = (card.dataset.capabilities || '').split('|');
+        if (!available.length) {
+          return false;
+        }
+        const lowered = available.map((item) => item.trim().toLowerCase());
+        for (const value of activeCapabilities) {
+          if (!lowered.includes(value.toLowerCase())) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      function matchesStage(card) {
+        if (!activeStage) {
+          return true;
+        }
+        return (card.dataset.stage || '').toLowerCase() === activeStage.toLowerCase();
+      }
+
+      function matchesSearch(card) {
+        const term = getSearchTerm();
+        if (!term) {
+          return true;
+        }
+        const haystack = (card.dataset.search || '').toLowerCase();
+        return haystack.includes(term);
+      }
+
+      function applyFilters() {
+        cards.forEach((card) => {
+          const visible = matchesStage(card) && matchesCapabilities(card) && matchesSearch(card);
+          card.classList.toggle('is-dimmed', !visible);
+          card.hidden = !visible;
+        });
+      }
+
+      function clearFilters() {
+        activeStage = null;
+        activeCapabilities.clear();
+        stageContainer.querySelectorAll('.chip').forEach((chip) => chip.classList.remove('is-active'));
+        capabilityContainer.querySelectorAll('.chip').forEach((chip) => chip.classList.remove('is-active'));
+        if (searchInput) {
+          searchInput.value = '';
+        }
+        applyFilters();
+      }
+
+      renderFilterChips();
+      applyFilters();
+
+      if (searchInput) {
+        searchInput.addEventListener('input', applyFilters);
+      }
+      if (clearButton) {
+        clearButton.addEventListener('click', clearFilters);
+      }
+    })();
+  </script>
+</body>
+</html>

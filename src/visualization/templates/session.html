@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header class="site-nav">
+    <div class="site-nav__inner container">
+      <a class="site-nav__brand" href="{{ url_for('index') }}">CaseSentinel</a>
+      <nav class="site-nav__links" aria-label="Primary">
+        <a class="site-nav__link" href="{{ url_for('index') }}">Dashboard</a>
+        <a class="site-nav__link" href="{{ url_for('agents_view') }}">Agents</a>
+        <a class="site-nav__link is-active" href="{{ url_for('session_view', case_id=session.case_id) }}">Archive</a>
+      </nav>
+    </div>
+  </header>
+
+  {% set agent_labels = {'analyst': 'Analyst', 'strategist': 'Strategist', 'forecaster': 'Forecaster'} %}
+
+  <main>
+    <section class="hero container hero--split">
+      <div class="hero__primary">
+        <p class="hero__eyebrow">Case timeline</p>
+        <h1>{{ session.case_id }}</h1>
+        <p class="hero__subtitle">{{ session.iteration_count }} iterations captured. Inspect the shared blackboard snapshot and every agent handoff in detail.</p>
+        <div class="hero__actions">
+          <a class="btn" href="{{ url_for('index') }}">Back to dashboard</a>
+          {% if session.summary_url %}
+            <a class="btn-secondary" href="{{ session.summary_url }}">Download summary JSON</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="hero__aside">
+        <article class="stat-card">
+          <p class="stat-label">Iterations</p>
+          <p class="stat-value">{{ session.iteration_count }}</p>
+          <p class="stat-detail">Final iteration index {{ session.iterations[-1].iteration if session.iterations else 0 }}</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">Last updated</p>
+          <p class="stat-value">{{ session.updated_at }}</p>
+          <p class="stat-detail">Timestamps follow the session export metadata</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section-card container">
+      <header class="section-heading">
+        <div>
+          <h2>Blackboard chronology</h2>
+          <p class="section-subtitle">Each iteration bundles the shared snapshot plus structured agent outputs.</p>
+        </div>
+      </header>
+      <div class="iteration-timeline">
+        {% for iteration in session.iterations %}
+        <article class="iteration-card">
+          <header class="iteration-card__header">
+            <span class="iteration-pill">Iteration {{ iteration.iteration }}</span>
+            {% if iteration.started_at or iteration.finished_at %}
+              <p class="iteration-meta">
+                {% if iteration.started_at %}{{ iteration.started_at }}{% endif %}
+                {% if iteration.finished_at %} → {{ iteration.finished_at }}{% endif %}
+              </p>
+            {% endif %}
+          </header>
+          <details class="snapshot-panel" open>
+            <summary>Blackboard snapshot</summary>
+            <pre>{{ iteration.snapshot }}</pre>
+          </details>
+          <div class="agent-output-grid">
+            {% for agent_name, payload in iteration.outputs.items() %}
+              <section class="agent-output">
+                <header>
+                  <h3>{{ agent_labels.get(agent_name, agent_name|capitalize) }}</h3>
+                </header>
+                {% if payload.plan is not none %}
+                  <h4>Plan</h4>
+                  <pre>{{ payload.plan or '(none)' }}</pre>
+                {% endif %}
+                <h4>Content</h4>
+                <pre>{{ payload.content }}</pre>
+                {% if payload.metrics %}
+                  <h4>Metrics</h4>
+                  <ul class="agent-metrics">
+                    {% for key, value in payload.metrics.items() %}
+                      <li><span>{{ key }}</span><strong>{{ value }}</strong></li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
+              </section>
+            {% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer container">
+    <p>Need interactive controls? Launch sessions from the dashboard to step through each iteration live.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script>
+    function initInteractiveSession() {
+      const controls = document.querySelector('.controls');
+      if (!controls) {
+        return;
+      }
+
+      const sessionId = controls.dataset.sessionId;
+      const advanceBtn = document.getElementById('advance-btn');
+      const rollbackBtn = document.getElementById('rollback-btn');
+      const messageEl = document.getElementById('control-message');
+      const historyContainer = document.getElementById('history-container');
+      const statusLine = document.getElementById('session-status-line');
+      const probabilityLine = document.getElementById('session-probability-line');
+      const nextAgentLabel = document.getElementById('session-next-agent');
+      const decisionBanner = document.getElementById('decision-banner');
+      const decisionText = document.getElementById('decision-banner-text');
+      const decisionContinueBtn = document.getElementById('decision-continue');
+      const decisionCompleteBtn = document.getElementById('decision-complete');
+  const boardColumns = document.getElementById('blackboard-columns');
+      const initialState = document.body.dataset.initialState ? JSON.parse(document.body.dataset.initialState) : null;
+
+      const manualForm = document.getElementById('manual-input-form');
+      const manualSectionSelect = manualForm ? manualForm.querySelector('select[name="section"]') : null;
+      const manualCustomSection = manualForm ? manualForm.querySelector('input[name="custom_section"]') : null;
+      const manualModeSelect = manualForm ? manualForm.querySelector('select[name="mode"]') : null;
+      const manualSummaryInput = manualForm ? manualForm.querySelector('input[name="summary"]') : null;
+      const manualTagsInput = manualForm ? manualForm.querySelector('input[name="tags"]') : null;
+      const manualSourceInput = manualForm ? manualForm.querySelector('input[name="source"]') : null;
+      const manualContentTextarea = manualForm ? manualForm.querySelector('textarea[name="content"]') : null;
+      const manualLog = document.getElementById('manual-log');
+
+      const AGENT_INFO = {
+        analyst: { label: 'Analyst', short: 'A' },
+        strategist: { label: 'Strategist', short: 'S' },
+        forecaster: { label: 'Forecaster', short: 'F' },
+      };
+      const AGENT_ORDER = ['analyst', 'strategist', 'forecaster'];
+      const EN_STOPWORDS = new Set(['the','and','with','from','into','that','have','will','this','case','analysis','update','agent','for','data','info','information','report','based','about','after','before','since','through','across','each','step','plan','risk','notes']);
+
+      function getAgentInfo(agent) {
+        const fallback = agent ? agent.charAt(0).toUpperCase() : '?';
+  return AGENT_INFO[agent] || { label: agent || 'Unknown role', short: fallback };
+      }
+
+      function createField(labelText, options = {}) {
+        const { name, value = '', rows = 6, section } = options;
+        const wrapper = document.createElement('label');
+        wrapper.className = 'inline-field';
+        const span = document.createElement('span');
+        span.textContent = labelText;
+        wrapper.appendChild(span);
+        const textarea = document.createElement('textarea');
+        textarea.rows = rows;
+        textarea.value = value || '';
+        if (name) {
+          textarea.name = name;
+        }
+        if (section) {
+          textarea.dataset.section = section;
+        }
+        wrapper.appendChild(textarea);
+        return wrapper;
+      }
+
+      function formatPercent(value) {
+        if (value === null || value === undefined) {
+          return '—';
+        }
+        return `${(value * 100).toFixed(1)}%`;
+      }
+
+      function formatTimestamp(ts) {
+        if (!ts) {
+          return '';
+        }
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) {
+          return ts;
+        }
+        return `${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+      }
+
+      function parseBlackboard(snapshot) {
+        if (!snapshot) {
+          return [];
+        }
+        const lines = snapshot.replace(/\r\n/g, '\n').split('\n');
+        const sections = [];
+        let currentTitle = null;
+        let currentLines = [];
+
+        const flushCurrent = () => {
+          if (!currentTitle) {
+            return;
+          }
+          const trimmed = currentLines.join('\n').trim();
+          sections.push({
+            title: currentTitle,
+            lines: currentLines.slice(),
+            content: trimmed,
+          });
+        };
+
+        lines.forEach((line) => {
+          const headingMatch = line.match(/^#{1,6}\s+(.*)$/);
+          if (headingMatch) {
+            flushCurrent();
+            currentTitle = headingMatch[1].trim();
+            currentLines = [];
+            return;
+          }
+          if (!currentTitle) {
+            return;
+          }
+          currentLines.push(line);
+        });
+
+        flushCurrent();
+        return sections;
+      }
+
+      function fallbackKeywords(text, limit) {
+        if (!text) {
+          return [];
+        }
+        const freq = new Map();
+        const chineseTokens = text.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
+        chineseTokens.forEach((token) => {
+          freq.set(token, (freq.get(token) || 0) + 1);
+        });
+        const latinTokens = text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) || [];
+        latinTokens.forEach((token) => {
+          if (EN_STOPWORDS.has(token)) {
+            return;
+          }
+          freq.set(token, (freq.get(token) || 0) + 1);
+        });
+        return Array.from(freq.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([word]) => word)
+          .slice(0, limit);
+      }
+
+      function extractKeywords(lines, limit = 4) {
+        const keywords = [];
+        const joined = lines.join('\n');
+
+        const boldMatches = joined.match(/\*\*([^*]{1,30})\*\*/g) || [];
+        boldMatches.forEach((match) => {
+          const token = match.replace(/\*\*/g, '').trim();
+          if (token) {
+            keywords.push(token);
+          }
+        });
+
+        lines.forEach((rawLine) => {
+          const line = rawLine.trim();
+          if (!line) {
+            return;
+          }
+          const cleaned = line.replace(/^[-*•]\s*/, '');
+          const colonIndex = cleaned.indexOf('：');
+          if (colonIndex > 0 && colonIndex <= 10) {
+            const candidate = cleaned
+              .slice(0, colonIndex)
+              .replace(/\*\*/g, '')
+              .replace(/[\[`~_]/g, '')
+              .trim();
+            if (candidate) {
+              keywords.push(candidate);
+            }
+            return;
+          }
+          const bracketMatch = cleaned.match(/^【(.{2,8})】/);
+          if (bracketMatch) {
+            keywords.push(bracketMatch[1]);
+            return;
+          }
+          const plainChinese = cleaned.match(/^[\u4e00-\u9fa5]{2,6}$/);
+          if (plainChinese) {
+            keywords.push(plainChinese[0]);
+            return;
+          }
+          const englishStart = cleaned.match(/^[A-Za-z][\w\s-]{2,18}/);
+          if (englishStart) {
+            const token = englishStart[0].trim().split(/\s+/)[0].toLowerCase();
+            if (!EN_STOPWORDS.has(token)) {
+              keywords.push(englishStart[0].trim());
+            }
+          }
+        });
+        const unique = Array.from(new Set(keywords.filter(Boolean)));
+        if (unique.length >= Math.min(limit, 3)) {
+          return unique.slice(0, limit);
+        }
+        return unique.concat(fallbackKeywords(lines.join(' '), limit)).slice(0, limit);
+      }
+
+      function extractTables(lines) {
+        const tables = [];
+        let buffer = [];
+        let indices = [];
+
+        const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line.trim());
+        const isSeparatorRow = (line) => {
+          const cleaned = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+          if (!cleaned) {
+            return false;
+          }
+          return cleaned.split('|').every((cell) => /^:?[-=]{3,}:?$/.test(cell.trim()))
+            && /[-=]{3,}/.test(cleaned);
+        };
+        const parseRow = (row) => row
+          .trim()
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((cell) => cell.trim());
+
+        const flush = () => {
+          if (buffer.length < 2) {
+            buffer = [];
+            indices = [];
+            return;
+          }
+          const [headerLine, separatorLine, ...dataLines] = buffer;
+          if (!isSeparatorRow(separatorLine)) {
+            buffer = [];
+            indices = [];
+            return;
+          }
+          const headerCells = parseRow(headerLine);
+          const rows = dataLines.filter((line) => isTableRow(line)).map(parseRow);
+          if (!headerCells.length && !rows.length) {
+            buffer = [];
+            indices = [];
+            return;
+          }
+          const width = Math.max(headerCells.length, ...rows.map((cells) => cells.length));
+          const normalise = (cells) => {
+            const next = cells.slice(0, width);
+            while (next.length < width) {
+              next.push('');
+            }
+            return next;
+          };
+          tables.push({
+            headers: normalise(headerCells),
+            rows: rows.map(normalise),
+            lineIndices: indices.slice(),
+          });
+          buffer = [];
+          indices = [];
+        };
+
+        lines.forEach((line, idx) => {
+          if (isTableRow(line)) {
+            buffer.push(line);
+            indices.push(idx);
+          } else {
+            flush();
+          }
+        });
+        flush();
+        return tables;
+      }
+
+      function extractSummary(lines, limit = 3) {
+        const bulletLines = lines
+          .map((line) => line.trim())
+          .filter((line) => /^[-*•]/.test(line) || /^\d+\./.test(line))
+          .map((line) => line.replace(/^[-*•]\s*/, '').replace(/^\d+\.\s*/, '').trim())
+          .filter(Boolean);
+
+        if (bulletLines.length) {
+          return bulletLines.slice(0, limit);
+        }
+
+        const text = lines.join(' ').replace(/\s+/g, ' ').trim();
+        if (!text) {
+          return [];
+        }
+        const sentences = text.split(/(?<=[。！？!?\.])\s*/).map((item) => item.trim()).filter(Boolean);
+        return sentences.slice(0, limit);
+      }
+
+      function renderBlackboard(snapshot) {
+        if (!boardColumns) {
+          return;
+        }
+        boardColumns.innerHTML = '';
+        const sections = parseBlackboard(snapshot);
+        if (!sections.length) {
+          const empty = document.createElement('div');
+          empty.className = 'kanban-placeholder';
+          empty.textContent = 'The blackboard is empty. Run one iteration or log a manual clue to generate a summary.';
+          boardColumns.appendChild(empty);
+          return;
+        }
+        sections.forEach((section) => {
+          const card = document.createElement('article');
+          card.className = 'kanban-card';
+
+          const header = document.createElement('header');
+          header.className = 'kanban-card__header';
+          const title = document.createElement('h3');
+          title.textContent = section.title;
+          header.appendChild(title);
+          const keywordWrap = document.createElement('div');
+          keywordWrap.className = 'kanban-card__keywords';
+          const tables = extractTables(section.lines);
+          const tableLineIndices = new Set();
+          tables.forEach((table) => {
+            table.lineIndices.forEach((idx) => tableLineIndices.add(idx));
+          });
+          const narrativeLines = section.lines.filter((_, idx) => !tableLineIndices.has(idx));
+          const baseKeywords = extractKeywords(narrativeLines.length ? narrativeLines : section.lines);
+          const tableKeywords = tables
+            .flatMap((table) => table.headers.slice(0, Math.min(3, table.headers.length)))
+            .filter((item) => item && item.trim());
+          const keywords = Array.from(new Set([...baseKeywords, ...tableKeywords]))
+            .filter((item) => item && item.trim())
+            .slice(0, 6);
+          keywords.forEach((keyword) => {
+            const chip = document.createElement('span');
+            chip.className = 'kanban-chip';
+            chip.textContent = keyword;
+            keywordWrap.appendChild(chip);
+          });
+          if (keywords.length) {
+            header.appendChild(keywordWrap);
+          }
+          card.appendChild(header);
+
+          const summaryItems = extractSummary(narrativeLines);
+          if (summaryItems.length) {
+            const list = document.createElement('ul');
+            list.className = 'kanban-card__summary';
+            summaryItems.forEach((item) => {
+              const li = document.createElement('li');
+              li.textContent = item;
+              list.appendChild(li);
+            });
+            card.appendChild(list);
+          }
+
+          const excerptSource = narrativeLines.join(' ');
+          if (excerptSource.trim()) {
+            const excerpt = document.createElement('p');
+            excerpt.className = 'kanban-card__excerpt';
+            const maxLength = 160;
+            const contentTrimmed = excerptSource.replace(/\s+/g, ' ').trim();
+            excerpt.textContent = contentTrimmed.length > maxLength
+              ? `${contentTrimmed.slice(0, maxLength)}…`
+              : contentTrimmed;
+            card.appendChild(excerpt);
+          }
+
+          tables.forEach((table) => {
+            const tableWrapper = document.createElement('div');
+            tableWrapper.className = 'kanban-card__table';
+            const tableEl = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            table.headers.forEach((cell) => {
+              const th = document.createElement('th');
+              th.textContent = cell;
+              headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+            tableEl.appendChild(thead);
+
+            if (table.rows.length) {
+              const tbody = document.createElement('tbody');
+              table.rows.forEach((row) => {
+                const tr = document.createElement('tr');
+                row.forEach((cell) => {
+                  const td = document.createElement('td');
+                  td.textContent = cell;
+                  tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+              });
+              tableEl.appendChild(tbody);
+            }
+
+            tableWrapper.appendChild(tableEl);
+            card.appendChild(tableWrapper);
+          });
+
+          boardColumns.appendChild(card);
+        });
+      }
+
+      function renderManualNotes(notes) {
+        if (!manualLog) {
+          return;
+        }
+        manualLog.innerHTML = '';
+        if (!notes || !notes.length) {
+          const empty = document.createElement('p');
+          empty.className = 'manual-empty';
+          empty.textContent = 'No manual records yet. Use the form above to add clues or evidence.';
+          manualLog.appendChild(empty);
+          return;
+        }
+        notes.slice().reverse().forEach((note) => {
+          const article = document.createElement('article');
+          article.className = 'manual-note';
+
+          const header = document.createElement('header');
+          const headerTitle = document.createElement('strong');
+          headerTitle.textContent = note.section;
+          header.appendChild(headerTitle);
+          const headerMeta = document.createElement('span');
+          const timestamp = note.timestamp || '';
+          const author = note.author || note.source || 'human';
+          headerMeta.textContent = timestamp ? `${timestamp} · ${author}` : author;
+          header.appendChild(headerMeta);
+          article.appendChild(header);
+
+          if (note.summary) {
+            const summary = document.createElement('p');
+            summary.className = 'manual-summary';
+            summary.textContent = note.summary;
+            article.appendChild(summary);
+          }
+
+          const body = document.createElement('pre');
+          body.className = 'manual-body';
+          body.textContent = note.content;
+          article.appendChild(body);
+
+          const footer = document.createElement('p');
+          footer.className = 'manual-meta';
+          const tags = Array.isArray(note.tags) ? note.tags.filter(Boolean) : [];
+          if (tags.length) {
+            const tagSpan = document.createElement('span');
+            tagSpan.className = 'manual-tags';
+            tagSpan.textContent = `Tags: ${tags.join(', ')}`;
+            footer.appendChild(tagSpan);
+          }
+          const modeSpan = document.createElement('span');
+          modeSpan.textContent = `Mode: ${note.mode === 'replace' ? 'Replace' : 'Append'}`;
+          footer.appendChild(modeSpan);
+          if (note.iteration !== undefined && note.iteration !== null) {
+            const iterationSpan = document.createElement('span');
+            iterationSpan.textContent = `Iteration: ${note.iteration}`;
+            footer.appendChild(iterationSpan);
+          }
+          if (note.source) {
+            const sourceSpan = document.createElement('span');
+            sourceSpan.textContent = `Source: ${note.source}`;
+            footer.appendChild(sourceSpan);
+          }
+          article.appendChild(footer);
+
+          manualLog.appendChild(article);
+        });
+      }
+
+      function formatIterationWindow(records) {
+        if (!records.length) {
+          return '';
+        }
+        const start = formatTimestamp(records[0].started_at);
+        const end = formatTimestamp(records[records.length - 1].finished_at);
+        if (start && end) {
+          return `${start} → ${end}`;
+        }
+        return start || end || '';
+      }
+
+      function createAgentCard(record) {
+        const card = document.createElement('article');
+        card.className = 'agent-card';
+        card.dataset.agent = record.agent;
+        card.dataset.iteration = record.iteration;
+
+        const info = getAgentInfo(record.agent);
+
+        const header = document.createElement('div');
+        header.className = 'agent-card__header';
+
+        const avatar = document.createElement('span');
+        avatar.className = 'agent-avatar';
+        avatar.textContent = info.short;
+        header.appendChild(avatar);
+
+        const titleBlock = document.createElement('div');
+        titleBlock.className = 'agent-card__title';
+        const title = document.createElement('strong');
+        title.textContent = info.label;
+        titleBlock.appendChild(title);
+        const metaLine = document.createElement('span');
+  metaLine.textContent = `Iteration ${record.iteration + 1} · ${record.agent}`;
+        titleBlock.appendChild(metaLine);
+        header.appendChild(titleBlock);
+
+        const timing = document.createElement('span');
+        timing.className = 'agent-card__meta';
+        const start = formatTimestamp(record.started_at);
+        const end = formatTimestamp(record.finished_at);
+  timing.textContent = start && end ? `${start} → ${end}` : (start || 'Running');
+        header.appendChild(timing);
+
+        card.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'agent-card__body';
+
+        const contentSection = document.createElement('section');
+        contentSection.className = 'agent-card__section';
+        const contentTitle = document.createElement('h4');
+        contentTitle.textContent = 'Output';
+        contentSection.appendChild(contentTitle);
+        const contentPre = document.createElement('pre');
+        contentPre.className = 'agent-card__output';
+  contentPre.textContent = record.output.content || '(no output)';
+        contentSection.appendChild(contentPre);
+        body.appendChild(contentSection);
+
+        if (record.output.plan !== null && record.output.plan !== undefined) {
+          const planSection = document.createElement('section');
+          planSection.className = 'agent-card__section';
+            const planTitle = document.createElement('h4');
+            planTitle.textContent = 'Plan';
+          planSection.appendChild(planTitle);
+          const planPre = document.createElement('pre');
+          planPre.className = 'agent-card__output';
+          planPre.textContent = record.output.plan || '';
+          planSection.appendChild(planPre);
+          body.appendChild(planSection);
+        }
+
+        const metrics = record.output.metrics || {};
+        const metricEntries = Object.entries(metrics);
+        if (metricEntries.length) {
+          const metricsWrap = document.createElement('div');
+          metricsWrap.className = 'agent-card__metrics';
+          metricEntries.forEach(([name, value]) => {
+            const chip = document.createElement('span');
+            chip.className = 'metric-chip';
+            chip.innerHTML = `<span>${name}</span><strong>${value}</strong>`;
+            metricsWrap.appendChild(chip);
+          });
+          body.appendChild(metricsWrap);
+        }
+
+        if (record.can_override) {
+          const form = document.createElement('form');
+          form.className = 'agent-card__override override-form';
+
+          const formTitle = document.createElement('h4');
+          formTitle.textContent = 'Manual override / feedback';
+          form.appendChild(formTitle);
+
+          form.appendChild(createField('Agent output (content)', { name: 'content', value: record.output.content }));
+
+          if (record.output.plan !== null && record.output.plan !== undefined) {
+            form.appendChild(createField('Agent plan', { name: 'plan', value: record.output.plan || '', rows: 4 }));
+          }
+
+          (record.section_updates || []).forEach((update) => {
+            form.appendChild(createField(`Blackboard section: ${update.name}`, { value: update.content, section: update.name }));
+          });
+
+          const submit = document.createElement('button');
+          submit.type = 'submit';
+          submit.className = 'btn';
+            submit.textContent = 'Save override';
+          form.appendChild(submit);
+
+          const hint = document.createElement('p');
+          hint.className = 'hint';
+            hint.textContent = 'Changes sync to the blackboard and influence upcoming agents.';
+          form.appendChild(hint);
+
+          card.appendChild(body);
+          card.appendChild(form);
+        } else {
+          card.appendChild(body);
+          if ((record.section_updates || []).length) {
+            const updatesSection = document.createElement('section');
+            updatesSection.className = 'agent-card__section';
+            const updatesTitle = document.createElement('h4');
+            updatesTitle.textContent = 'Blackboard updates';
+            updatesSection.appendChild(updatesTitle);
+            (record.section_updates || []).forEach((update) => {
+              const label = document.createElement('p');
+              label.className = 'section-label';
+              label.textContent = update.name;
+              updatesSection.appendChild(label);
+              const sectionPre = document.createElement('pre');
+              sectionPre.className = 'agent-card__output';
+              sectionPre.textContent = update.content;
+              updatesSection.appendChild(sectionPre);
+            });
+            card.appendChild(updatesSection);
+          }
+        }
+
+        return card;
+      }
+
+      function renderHistory(history) {
+        if (!historyContainer) {
+          return;
+        }
+        historyContainer.innerHTML = '';
+        if (!history || !history.length) {
+          const empty = document.createElement('div');
+          empty.className = 'timeline-empty';
+          empty.innerHTML = '<p>No multi-agent output yet. Run “Next step” to start the reasoning loop.</p>';
+          historyContainer.appendChild(empty);
+          return;
+        }
+
+        const grouped = new Map();
+        history.forEach((record) => {
+          if (!grouped.has(record.iteration)) {
+            grouped.set(record.iteration, []);
+          }
+          grouped.get(record.iteration).push(record);
+        });
+
+        Array.from(grouped.keys())
+          .sort((a, b) => a - b)
+          .forEach((iteration) => {
+            const records = grouped.get(iteration) || [];
+            const wrapper = document.createElement('section');
+            wrapper.className = 'iteration-group';
+            wrapper.dataset.iteration = iteration;
+
+            const header = document.createElement('header');
+            header.className = 'iteration-header';
+            const title = document.createElement('div');
+            title.className = 'iteration-title';
+            const pill = document.createElement('span');
+            pill.className = 'iteration-pill';
+            pill.textContent = `Iteration ${iteration + 1}`;
+            title.appendChild(pill);
+            const windowLabel = formatIterationWindow(records);
+            if (windowLabel) {
+              const subtitle = document.createElement('span');
+              subtitle.className = 'iteration-subtitle';
+              subtitle.textContent = windowLabel;
+              title.appendChild(subtitle);
+            }
+            header.appendChild(title);
+            wrapper.appendChild(header);
+
+            const grid = document.createElement('div');
+            grid.className = 'agent-card-grid';
+
+            const ordered = records
+              .slice()
+              .sort((a, b) => {
+                const orderA = AGENT_ORDER.indexOf(a.agent);
+                const orderB = AGENT_ORDER.indexOf(b.agent);
+                return (orderA === -1 ? 99 : orderA) - (orderB === -1 ? 99 : orderB);
+              });
+            ordered.forEach((recordItem) => {
+              grid.appendChild(createAgentCard(recordItem));
+            });
+
+            wrapper.appendChild(grid);
+            historyContainer.appendChild(wrapper);
+          });
+      }
+
+      function updateSectionOptions(sections) {
+        if (!manualSectionSelect) {
+          return;
+        }
+        const currentValue = manualSectionSelect.value;
+        manualSectionSelect.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+  placeholder.textContent = 'Select existing section';
+        manualSectionSelect.appendChild(placeholder);
+        sections.forEach((section) => {
+          const option = document.createElement('option');
+          option.value = section;
+          option.textContent = section;
+          manualSectionSelect.appendChild(option);
+        });
+        const customOption = document.createElement('option');
+        customOption.value = '__custom__';
+  customOption.textContent = '(Custom section)';
+        manualSectionSelect.appendChild(customOption);
+        if (sections.includes(currentValue)) {
+          manualSectionSelect.value = currentValue;
+        } else if (currentValue === '__custom__') {
+          manualSectionSelect.value = '__custom__';
+        }
+      }
+
+      function updateHeader(state) {
+  statusLine.textContent = `Case: ${state.case_id} · Status: ${state.status} · Iteration: ${state.current_iteration}/${state.iteration_limit}`;
+  probabilityLine.textContent = `Success threshold: ${formatPercent(state.success_threshold)} · Latest forecast: ${formatPercent(state.last_success_probability)}`;
+  nextAgentLabel.textContent = state.next_agent || 'All complete';
+      }
+
+      function updateControls(state) {
+        const isRunning = state.status === 'running';
+        if (isRunning) {
+          advanceBtn.disabled = false;
+          advanceBtn.removeAttribute('aria-disabled');
+        } else {
+          advanceBtn.disabled = true;
+          advanceBtn.setAttribute('aria-disabled', 'true');
+        }
+
+        const awaitingDecision = state.status === 'awaiting_decision';
+        if (awaitingDecision) {
+          decisionBanner.hidden = false;
+          decisionText.textContent = state.halt_reason === 'max_iterations'
+            ? 'The iteration cap has been reached. Decide whether to continue.'
+            : 'The success threshold has been met. You can wrap up or continue.';
+          const reachedLimit = state.current_iteration >= state.iteration_limit;
+          decisionContinueBtn.disabled = reachedLimit;
+          if (reachedLimit) {
+            decisionContinueBtn.setAttribute('aria-disabled', 'true');
+          } else {
+            decisionContinueBtn.removeAttribute('aria-disabled');
+          }
+          decisionCompleteBtn.disabled = false;
+          decisionCompleteBtn.removeAttribute('aria-disabled');
+        } else {
+          decisionBanner.hidden = true;
+          decisionContinueBtn.disabled = true;
+          decisionContinueBtn.setAttribute('aria-disabled', 'true');
+          decisionCompleteBtn.disabled = true;
+          decisionCompleteBtn.setAttribute('aria-disabled', 'true');
+        }
+
+        if (state.status === 'completed') {
+          decisionBanner.hidden = true;
+          advanceBtn.disabled = true;
+          advanceBtn.setAttribute('aria-disabled', 'true');
+          decisionCompleteBtn.disabled = true;
+          decisionCompleteBtn.setAttribute('aria-disabled', 'true');
+        }
+      }
+
+      function applyState(state) {
+        if (!state) {
+          return;
+        }
+        renderBlackboard(state.blackboard_snapshot || '');
+        renderHistory(state.history || []);
+        updateHeader(state);
+        updateControls(state);
+        if (manualForm && Array.isArray(state.available_sections)) {
+          updateSectionOptions(state.available_sections);
+        }
+        renderManualNotes(state.manual_notes || []);
+      }
+
+      if (initialState) {
+        applyState(initialState);
+      } else if (historyContainer) {
+        const initialHistory = historyContainer.dataset.initial ? JSON.parse(historyContainer.dataset.initial) : [];
+        renderHistory(initialHistory);
+        renderManualNotes([]);
+      }
+
+      if (historyContainer) {
+        historyContainer.addEventListener('submit', async (event) => {
+          const form = event.target;
+          if (!form.classList.contains('override-form')) {
+            return;
+          }
+          event.preventDefault();
+          const card = form.closest('.agent-card');
+          if (!card) {
+            return;
+          }
+          const agent = card.dataset.agent;
+          const iteration = Number(card.dataset.iteration || '0');
+          const contentField = form.querySelector('textarea[name="content"]');
+          const planField = form.querySelector('textarea[name="plan"]');
+          const sectionFields = Array.from(form.querySelectorAll('textarea[data-section]'));
+          const payload = {
+            agent,
+            iteration,
+            content: contentField ? contentField.value : '',
+            sections: sectionFields.map((field) => ({
+              name: field.dataset.section,
+              content: field.value,
+            })),
+          };
+          if (planField) {
+            payload.plan = planField.value;
+          }
+
+          messageEl.textContent = 'Saving override…';
+          const response = await fetch(`/api/interactive-sessions/${sessionId}/override`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            messageEl.textContent = data.detail || 'Failed to save override';
+            return;
+          }
+
+          messageEl.textContent = 'Agent output updated.';
+          applyState(data.state);
+        });
+      }
+
+      if (manualForm) {
+        if (manualSectionSelect && manualCustomSection) {
+          manualSectionSelect.addEventListener('change', () => {
+            if (manualSectionSelect.value === '__custom__') {
+              manualCustomSection.focus();
+            } else if (manualCustomSection.value.trim()) {
+              manualCustomSection.value = '';
+            }
+          });
+          manualCustomSection.addEventListener('input', () => {
+            if (manualCustomSection.value.trim()) {
+              manualSectionSelect.value = '__custom__';
+            }
+          });
+        }
+
+        manualForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          let sectionValue = '';
+          const customValue = manualCustomSection ? manualCustomSection.value.trim() : '';
+          const selectedValue = manualSectionSelect ? manualSectionSelect.value : '';
+          if (customValue) {
+            sectionValue = customValue;
+          } else if (selectedValue && selectedValue !== '__custom__') {
+            sectionValue = selectedValue;
+          }
+          if (!sectionValue) {
+            messageEl.textContent = 'Select an existing section or provide a new name.';
+            return;
+          }
+          const contentValue = manualContentTextarea ? manualContentTextarea.value.trim() : '';
+          if (!contentValue) {
+            messageEl.textContent = 'Enter the content you want to record.';
+            return;
+          }
+          const payload = {
+            section: sectionValue,
+            content: contentValue,
+            mode: manualModeSelect ? manualModeSelect.value : 'append',
+            source: manualSourceInput && manualSourceInput.value.trim() ? manualSourceInput.value.trim() : 'human',
+            summary: manualSummaryInput ? manualSummaryInput.value.trim() || null : null,
+            tags: manualTagsInput && manualTagsInput.value.trim()
+              ? manualTagsInput.value.split(',').map((tag) => tag.trim()).filter(Boolean)
+              : [],
+          };
+          messageEl.textContent = 'Recording manual insight…';
+          const response = await fetch(`/api/interactive-sessions/${sessionId}/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            messageEl.textContent = data.detail || 'Failed to record insight';
+            return;
+          }
+          messageEl.textContent = 'Manual insight saved.';
+          manualForm.reset();
+          if (manualSourceInput) {
+            manualSourceInput.value = 'human';
+          }
+          applyState(data.state);
+        });
+      }
+
+      async function refreshState() {
+        const response = await fetch(`/api/interactive-sessions/${sessionId}`);
+        if (!response.ok) {
+          messageEl.textContent = 'Failed to refresh status.';
+          return;
+        }
+        const data = await response.json();
+        applyState(data);
+      }
+
+      advanceBtn.addEventListener('click', async () => {
+        if (advanceBtn.disabled) {
+          return;
+        }
+  messageEl.textContent = 'Running…';
+        const response = await fetch(`/api/interactive-sessions/${sessionId}/step`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok) {
+          messageEl.textContent = data.detail || 'Step failed';
+          return;
+        }
+  messageEl.textContent = `Ran ${data.step.agent} · iteration ${data.step.iteration}`;
+        applyState(data.state);
+      });
+
+      rollbackBtn.addEventListener('click', async () => {
+  messageEl.textContent = 'Rolling back…';
+        const response = await fetch(`/api/interactive-sessions/${sessionId}/rollback`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok) {
+          messageEl.textContent = data.detail || 'Rollback failed';
+          return;
+        }
+  messageEl.textContent = `Rolled back ${data.step.agent}`;
+        applyState(data.state);
+      });
+
+      decisionContinueBtn.addEventListener('click', async () => {
+  messageEl.textContent = 'Continuing…';
+        decisionContinueBtn.disabled = true;
+        decisionContinueBtn.setAttribute('aria-disabled', 'true');
+        const response = await fetch(`/api/case-sessions/${sessionId}/decision`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'continue' }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          messageEl.textContent = data.detail || 'Unable to continue';
+          decisionContinueBtn.disabled = false;
+          decisionContinueBtn.removeAttribute('aria-disabled');
+          return;
+        }
+  messageEl.textContent = 'Continuation approved. Run the next agent.';
+        applyState(data);
+      });
+
+      decisionCompleteBtn.addEventListener('click', async () => {
+  messageEl.textContent = 'Completing session…';
+        decisionCompleteBtn.disabled = true;
+        decisionCompleteBtn.setAttribute('aria-disabled', 'true');
+        const response = await fetch(`/api/case-sessions/${sessionId}/decision`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'complete' }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          messageEl.textContent = data.detail || 'Failed to complete session';
+          decisionCompleteBtn.disabled = false;
+          decisionCompleteBtn.removeAttribute('aria-disabled');
+          return;
+        }
+  messageEl.textContent = 'Session marked as complete.';
+        applyState(data);
+      });
+
+      setInterval(refreshState, 6000);
+    }
+
+    window.addEventListener('DOMContentLoaded', initInteractiveSession);
+  </script>
+</head>
+<body data-initial-state='{{ session | tojson | safe }}'>
+  <header class="session-header">
+    <div>
+      <h1>Interactive session {{ session.session_id }}</h1>
+      <p id="session-status-line">Case: {{ session.case_id }} · Status: {{ session.status }} · Iteration: {{ session.current_iteration }}/{{ session.iteration_limit }}</p>
+      <p id="session-probability-line">Success threshold: {{ (session.success_threshold * 100) | round(1) }}% · Latest forecast: {% if session.last_success_probability is not none %}{{ (session.last_success_probability * 100) | round(1) }}%{% else %}—{% endif %}</p>
+      <p>Next agent: <strong id="session-next-agent">{{ session.next_agent or 'All complete' }}</strong></p>
+    </div>
+    <a class="btn" href="/" target="_blank">Open dashboard</a>
+  </header>
+
+  <section class="controls" data-session-id="{{ session.session_id }}">
+    <button class="btn" id="advance-btn">Run next step</button>
+    <button class="btn-secondary" id="rollback-btn">Rollback step</button>
+    <span id="control-message" class="message"></span>
+  </section>
+
+  <section class="decision-banner" id="decision-banner" hidden>
+    <p id="decision-banner-text"></p>
+    <div class="decision-actions">
+      <button class="btn" id="decision-continue">Continue session</button>
+      <button class="btn-secondary" id="decision-complete">Complete session</button>
+    </div>
+  </section>
+
+  <div class="session-grid">
+    <section class="board-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Blackboard overview</h2>
+          <p class="panel-subtitle">Distill key facts and spot patterns at a glance.</p>
+        </div>
+        <div class="panel-actions">
+          <span class="panel-hint">Live sync</span>
+        </div>
+      </div>
+      <div id="blackboard-columns" class="board-columns">
+        <div class="kanban-placeholder">The blackboard is empty. Run an iteration or log a manual insight to populate it.</div>
+      </div>
+    </section>
+
+    <section class="manual-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Manual intelligence</h2>
+          <p class="panel-subtitle">Capture frontline findings to steer the investigation.</p>
+        </div>
+      </div>
+      <div class="manual-content">
+        <form id="manual-input-form" class="manual-form">
+          <label>
+            Select section
+            <select name="section">
+              <option value="">Select existing section</option>
+            </select>
+          </label>
+          <label>
+            Custom section (optional)
+            <input type="text" name="custom_section" placeholder="e.g., On-site inspection notes">
+          </label>
+          <label>
+            Update mode
+            <select name="mode">
+              <option value="append" selected>Append</option>
+              <option value="replace">Replace</option>
+            </select>
+          </label>
+          <label>
+            Source
+            <input type="text" name="source" value="human" placeholder="Patrol officer">
+          </label>
+          <label>
+            Summary (optional)
+            <input type="text" name="summary" placeholder="One-line overview">
+          </label>
+          <label>
+            Tags (comma separated, optional)
+            <input type="text" name="tags" placeholder="scene, evidence">
+          </label>
+          <label class="full-width">
+            Details
+            <textarea name="content" rows="5" placeholder="Document new evidence, leads, or hypotheses."></textarea>
+          </label>
+          <button type="submit" class="btn">Record manual insight</button>
+          <p class="hint">Entries sync to the blackboard and inform upcoming agents.</p>
+        </form>
+        <div class="manual-log-wrapper">
+          <h3>Manual log</h3>
+          <div id="manual-log" class="manual-log"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="timeline-panel">
+    <div class="panel-header">
+      <div>
+        <h2>Multi-agent timeline</h2>
+        <p class="panel-subtitle">Review each output and submit inline feedback.</p>
+      </div>
+    </div>
+    <div id="history-container" class="timeline-grid" data-initial='{{ session.history | tojson | safe }}'></div>
+  </section>
+</body>
+</html>
