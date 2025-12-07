@@ -28,6 +28,11 @@ dev = [
     "pytest>=7.4.0",
 ]
 
+ascend = [
+    "mindspore>=2.2.0; platform_system == 'Linux'",
+    "mindformers>=2.1.0; platform_system == 'Linux'",
+]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["src"]

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
   <script>
     function initInteractiveSession() {
-      const controls = document.querySelector('.controls');
+      const controls = document.querySelector('.control-shelf');
       if (!controls) {
         return;
       }
@@ -19,12 +19,17 @@
       const historyContainer = document.getElementById('history-container');
       const statusLine = document.getElementById('session-status-line');
       const probabilityLine = document.getElementById('session-probability-line');
+      const forecastInline = document.getElementById('session-forecast-inline');
+      const statusChip = document.getElementById('session-status-chip');
+      const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
+      const autoRefreshDot = document.getElementById('auto-refresh-dot');
+      const lastUpdated = document.getElementById('last-updated-pill');
       const nextAgentLabel = document.getElementById('session-next-agent');
       const decisionBanner = document.getElementById('decision-banner');
       const decisionText = document.getElementById('decision-banner-text');
       const decisionContinueBtn = document.getElementById('decision-continue');
       const decisionCompleteBtn = document.getElementById('decision-complete');
-  const boardColumns = document.getElementById('blackboard-columns');
+      const boardColumns = document.getElementById('blackboard-columns');
       const initialState = document.body.dataset.initialState ? JSON.parse(document.body.dataset.initialState) : null;
 
       const manualForm = document.getElementById('manual-input-form');
@@ -44,6 +49,30 @@
       };
       const AGENT_ORDER = ['analyst', 'strategist', 'forecaster'];
       const EN_STOPWORDS = new Set(['the','and','with','from','into','that','have','will','this','case','analysis','update','agent','for','data','info','information','report','based','about','after','before','since','through','across','each','step','plan','risk','notes']);
+      let refreshTimer = null;
+
+      function touchUpdated() {
+        if (!lastUpdated) {
+          return;
+        }
+        const stamp = new Date();
+        lastUpdated.textContent = `Synced ${stamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      }
+
+      function setAutoRefresh(enabled) {
+        if (autoRefreshToggle) {
+          autoRefreshToggle.checked = enabled;
+        }
+        if (autoRefreshDot) {
+          autoRefreshDot.dataset.tone = enabled ? 'success' : 'idle';
+        }
+        if (enabled && !refreshTimer) {
+          refreshTimer = setInterval(() => refreshState(true), 6000);
+        } else if (!enabled && refreshTimer) {
+          clearInterval(refreshTimer);
+          refreshTimer = null;
+        }
+      }
 
       function getAgentInfo(agent) {
         const fallback = agent ? agent.charAt(0).toUpperCase() : '?';
@@ -705,9 +734,17 @@
       }
 
       function updateHeader(state) {
-  statusLine.textContent = `Case: ${state.case_id} · Status: ${state.status} · Iteration: ${state.current_iteration}/${state.iteration_limit}`;
-  probabilityLine.textContent = `Success threshold: ${formatPercent(state.success_threshold)} · Latest forecast: ${formatPercent(state.last_success_probability)}`;
-  nextAgentLabel.textContent = state.next_agent || 'All complete';
+        statusLine.textContent = `Case: ${state.case_id} · Status: ${state.status} · Iteration: ${state.current_iteration}/${state.iteration_limit}`;
+        const forecastText = formatPercent(state.last_success_probability);
+        probabilityLine.textContent = `Success threshold: ${formatPercent(state.success_threshold)} · Latest forecast: ${forecastText}`;
+        if (forecastInline) {
+          forecastInline.textContent = forecastText;
+        }
+        if (statusChip) {
+          statusChip.textContent = (state.status || '').replace('_', ' ');
+          statusChip.dataset.status = state.status || '';
+        }
+        nextAgentLabel.textContent = state.next_agent || 'All complete';
       }
 
       function updateControls(state) {
@@ -764,6 +801,7 @@
           updateSectionOptions(state.available_sections);
         }
         renderManualNotes(state.manual_notes || []);
+        touchUpdated();
       }
 
       if (initialState) {
@@ -885,14 +923,28 @@
         });
       }
 
-      async function refreshState() {
+      if (autoRefreshToggle) {
+        autoRefreshToggle.addEventListener('change', () => {
+          setAutoRefresh(autoRefreshToggle.checked);
+        });
+      }
+
+      async function refreshState(quiet = false) {
+        if (!quiet) {
+          messageEl.textContent = 'Refreshing status…';
+        }
         const response = await fetch(`/api/interactive-sessions/${sessionId}`);
         if (!response.ok) {
-          messageEl.textContent = 'Failed to refresh status.';
+          if (!quiet) {
+            messageEl.textContent = 'Failed to refresh status.';
+          }
           return;
         }
         const data = await response.json();
         applyState(data);
+        if (!quiet) {
+          messageEl.textContent = 'Status updated.';
+        }
       }
 
       advanceBtn.addEventListener('click', async () => {
@@ -943,7 +995,7 @@
       });
 
       decisionCompleteBtn.addEventListener('click', async () => {
-  messageEl.textContent = 'Completing session…';
+        messageEl.textContent = 'Completing session…';
         decisionCompleteBtn.disabled = true;
         decisionCompleteBtn.setAttribute('aria-disabled', 'true');
         const response = await fetch(`/api/case-sessions/${sessionId}/decision`, {
@@ -958,31 +1010,65 @@
           decisionCompleteBtn.removeAttribute('aria-disabled');
           return;
         }
-  messageEl.textContent = 'Session marked as complete.';
+        messageEl.textContent = 'Session marked as complete.';
         applyState(data);
       });
 
-      setInterval(refreshState, 6000);
+      setAutoRefresh(true);
     }
 
     window.addEventListener('DOMContentLoaded', initInteractiveSession);
   </script>
 </head>
 <body data-initial-state='{{ session | tojson | safe }}'>
-  <header class="session-header">
+  <header class="session-header session-header--interactive">
     <div>
-      <h1>Interactive session {{ session.session_id }}</h1>
+      <p class="hero__eyebrow">Interactive control room</p>
+      <div class="session-title-row">
+        <h1>Case {{ session.case_id }}</h1>
+        <span class="session-chip" id="session-status-chip" data-status="{{ session.status }}">{{ session.status|replace('_', ' ') }}</span>
+      </div>
       <p id="session-status-line">Case: {{ session.case_id }} · Status: {{ session.status }} · Iteration: {{ session.current_iteration }}/{{ session.iteration_limit }}</p>
       <p id="session-probability-line">Success threshold: {{ (session.success_threshold * 100) | round(1) }}% · Latest forecast: {% if session.last_success_probability is not none %}{{ (session.last_success_probability * 100) | round(1) }}%{% else %}—{% endif %}</p>
-      <p>Next agent: <strong id="session-next-agent">{{ session.next_agent or 'All complete' }}</strong></p>
+      <div class="session-meta-grid">
+        <div class="meta-card">
+          <p>Session ID</p>
+          <strong>{{ session.session_id }}</strong>
+        </div>
+        <div class="meta-card">
+          <p>Next agent</p>
+          <strong id="session-next-agent">{{ session.next_agent or 'All complete' }}</strong>
+        </div>
+        <div class="meta-card">
+          <p>Latest forecast</p>
+          <strong id="session-forecast-inline">{% if session.last_success_probability is not none %}{{ (session.last_success_probability * 100) | round(1) }}%{% else %}—{% endif %}</strong>
+        </div>
+        <div class="meta-card">
+          <p>Auto-refresh</p>
+          <strong><span class="status-dot" id="auto-refresh-dot" data-tone="success"></span> 6s</strong>
+        </div>
+      </div>
     </div>
-    <a class="btn" href="/" target="_blank">Open dashboard</a>
+    <div class="action-links">
+      <a class="btn-secondary" href="/" target="_blank">Dashboard</a>
+      <a class="btn-tertiary" href="{{ url_for('session_view', case_id=session.case_id) }}" target="_blank">Archive</a>
+    </div>
   </header>
 
-  <section class="controls" data-session-id="{{ session.session_id }}">
-    <button class="btn" id="advance-btn">Run next step</button>
-    <button class="btn-secondary" id="rollback-btn">Rollback step</button>
-    <span id="control-message" class="message"></span>
+  <section class="control-shelf" data-session-id="{{ session.session_id }}">
+    <div class="control-row">
+      <button class="btn" id="advance-btn">Run next step</button>
+      <button class="btn-secondary" id="rollback-btn">Rollback step</button>
+      <label class="toggle">
+        <input type="checkbox" id="auto-refresh-toggle" checked>
+        <span>Auto-refresh every 6s</span>
+      </label>
+      <span class="pill pill--muted" id="last-updated-pill">Synced now</span>
+      <span id="control-message" class="message"></span>
+    </div>
+    <div class="control-row">
+      <span class="pill pill--outline">Decision gate appears when threshold or iteration cap is reached</span>
+    </div>
   </section>
 
   <section class="decision-banner" id="decision-banner" hidden>

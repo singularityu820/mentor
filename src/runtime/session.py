@@ -177,10 +177,10 @@ class InvestigationSession:
         return (
             f"- 案件编号：{record.case_id}\n"
             f"- 案别类型：{record.case_type or '-'}\n"
-            f"- 审理法院：{record.court or '-'}\n"
+            f"- 承办法院/立案单位：{record.court or '-'}\n"
             f"- 指控罪名：{charges}\n"
             f"- 适用法条：{legal_basis}\n"
-            f"- 判决要点：{sentence}\n"
+            f"- 已知司法结论（供对照）：{sentence}\n"
             f"- 数据质量：\n  {quality_text}"
         )
 

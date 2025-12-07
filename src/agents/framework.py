@@ -263,7 +263,7 @@ class AgentOrchestrator:
         parts = [
             f"案件编号：{record.case_id}",
             f"案别类型：{record.case_type or '-'}",
-            f"审理法院：{record.court or '-'}",
+            f"承办/审理机关（供对照）：{record.court or '-'}",
         ]
         if record.charges:
             parts.append(f"指控罪名：{'、'.join(record.charges[:5])}")

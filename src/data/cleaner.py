@@ -1,9 +1,10 @@
-"""Utilities for transforming raw court verdict documents into structured data.
+"""Utilities for transforming raw case documents into structured data.
 
 The goal of this module is to convert the verbose, often noisy `Case_info`
-strings scraped from裁判文书网 into a structured `CaseRecord`. The exported
-schema is intentionally opinionated so that downstream agents can rely on a
-consistent view of案件参与人、证据、时间线等要素。
+strings scraped from裁判文书网 into a structured `CaseRecord`. Although源文本多为
+判决书，本模块聚焦还原刑侦要素（人物/证据/时间线/行动），以支撑后续侦查推理。
+The exported schema is intentionally opinionated so that downstream agents can
+rely on a consistent view of案件参与人、证据、时间线等要素。
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ class CaseEvent:
 
     timestamp: str
     description: str
-    source: str = "判决书"
+    source: str = "案件文书"
 
 
 @dataclass

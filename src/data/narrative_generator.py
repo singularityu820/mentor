@@ -33,9 +33,9 @@ class NarrativeSample(BaseModel):
 SYSTEM_PROMPT = (
     "你是一线刑侦专案组的带班负责人，需要在保持事实准确的前提下，\n"
     "将现有案情资料整理为《侦查研判纪要》。请严格以侦查视角写作：\n"
-    "1. 依据案件时间线重建案发经过与侦查推进，不要复述法庭裁判流程；\n"
-    "2. 以证据链条说明已掌握线索如何指向主要嫌疑，并指出证据缺口；\n"
-    "3. 标记必须尽快核实的疑点、资源需求或潜在风险；\n"
+    "1. 从报案/接警开始按时间顺序记录侦查行动、发现与假说更新，避免复述庭审/裁判流程；\n"
+    "2. 以证据链条说明已掌握线索如何指向主要嫌疑，并明确证据缺口及信息源；\n"
+    "3. 标记必须尽快核实的疑点、资源需求或潜在风险，并给出可执行的下一步动作；\n"
     "4. 采用专业、精确、便于行动部署的语气，不做终局定论。"
 )
 
@@ -73,10 +73,10 @@ class NarrativeGenerator:
             "案别类型": record.case_type,
             "涉嫌罪名": record.charges,
             "涉案角色": {role: names[:6] for role, names in role_map.items()},
-            "案发经过": record.factual_findings[:1000],
-            "侦查纪要": record.proceedings_summary[:600],
+            "案情还原（侦查视角）": record.factual_findings[:1000],
+            "侦查行动摘要": record.proceedings_summary[:600],
             "关键时间线": timeline,
-            "证据提要": evidence_digest,
+            "证据链提要": evidence_digest,
             "质量提示": {
                 "完整度": quality.completeness_score,
                 "缺失字段": quality.missing_sections,

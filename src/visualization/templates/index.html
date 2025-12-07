@@ -22,31 +22,75 @@
   </header>
 
   <main>
-    <section class="hero hero--split container">
+    <section class="hero hero--split hero--demo container">
       <div class="hero__primary">
-        <p class="hero__eyebrow">Multi-agent blackboard orchestration</p>
+        <p class="hero__eyebrow">Interactive orchestration</p>
         <h1>{{ title }}</h1>
-        <p class="hero__subtitle">Launch collaborative investigations, track success thresholds, and review every iteration without leaving the dashboard.</p>
+        <p class="hero__subtitle">Launch a room in seconds, watch the multi-agent loop progress, and share the archive when the threshold is met.</p>
         <div class="hero__actions">
-          <a class="btn" href="{{ url_for('agents_view') }}">Explore agents</a>
+          <a class="btn" href="{{ url_for('agents_view') }}">Browse agents</a>
           {% if first_case_id %}
-            <a class="btn-secondary" href="{{ url_for('session_view', case_id=first_case_id) }}">Open latest archive</a>
+            <a class="btn-secondary" href="{{ url_for('session_view', case_id=first_case_id) }}">Latest archive</a>
           {% else %}
             <span class="btn-secondary is-disabled" aria-disabled="true">No archives yet</span>
           {% endif %}
         </div>
+        <div class="hero__inline">
+          <span class="pill pill--neutral">{{ interactive_count }} live rooms</span>
+          <span class="pill pill--muted">{{ archived_count }} archived</span>
+          <span class="pill pill--outline">Outputs live under <code>outputs/sessions</code></span>
+        </div>
       </div>
-      <div class="hero__aside">
-        <article class="stat-card">
-          <p class="stat-label">Interactive rooms</p>
-          <p class="stat-value">{{ interactive_count }}</p>
-          <p class="stat-detail">Sessions staged in memory</p>
+      <div class="hero__aside hero__aside--stack">
+        <article class="stat-card stat-card--contrast">
+          <p class="stat-label">Quick demo tip</p>
+          <p class="stat-value">Pick a preset</p>
+          <p class="stat-detail">Then toggle “Auto-open workspace” to jump straight into the interactive room.</p>
         </article>
         <article class="stat-card">
-          <p class="stat-label">Archived sessions</p>
-          <p class="stat-value">{{ archived_count }}</p>
-          <p class="stat-detail">Files discovered under <code>outputs/sessions</code></p>
+          <p class="stat-label">Success threshold</p>
+          <p class="stat-value">80%</p>
+          <p class="stat-detail">Default stop condition (editable below)</p>
         </article>
+      </div>
+    </section>
+
+    <section class="section-card container demo-rail" aria-labelledby="quickstart-heading">
+      <header class="section-heading">
+        <div>
+          <h2 id="quickstart-heading">Pick a quick-start</h2>
+          <p class="section-subtitle">Pre-fill the form for common demos. You can still tweak fields before launching.</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="auto-open-workspace" checked>
+          <span>Auto-open workspace after launch</span>
+        </label>
+      </header>
+      <div class="quickstart-grid">
+        <button type="button" class="quick-card" data-quickstart="dataset">
+          <div class="quick-card__head">
+            <span class="quick-card__icon" aria-hidden="true">📂</span>
+            <span class="pill">Dataset</span>
+          </div>
+          <h3>Cleaned dataset</h3>
+          <p>Load a record from <code>outputs/cleaned_cases.jsonl</code> and start iterating.</p>
+        </button>
+        <button type="button" class="quick-card" data-quickstart="raw">
+          <div class="quick-card__head">
+            <span class="quick-card__icon" aria-hidden="true">📝</span>
+            <span class="pill pill--muted">Raw</span>
+          </div>
+          <h3>Paste raw judgment</h3>
+          <p>Drop original text; the cleaner will build a structured case before the agents run.</p>
+        </button>
+        <button type="button" class="quick-card" data-quickstart="live">
+          <div class="quick-card__head">
+            <span class="quick-card__icon" aria-hidden="true">✨</span>
+            <span class="pill pill--accent">Live</span>
+          </div>
+          <h3>Blank live case</h3>
+          <p>Bootstrap an empty template with a title, summary, and optional charges to co-edit in the room.</p>
+        </button>
       </div>
     </section>
 
@@ -54,7 +98,12 @@
       <header class="section-heading">
         <div>
           <h2 id="launch-heading">Launch a collaborative session</h2>
-          <p class="section-subtitle">Pick a case source, set the success threshold, and the orchestrator will prompt you when it is time to decide.</p>
+          <p class="section-subtitle">Choose the source, adjust thresholds, and spin up the control room.</p>
+        </div>
+        <div class="section-actions">
+          <span class="pill pill--outline">Step 1 · Configure</span>
+          <span class="pill pill--outline">Step 2 · Launch</span>
+          <span class="pill pill--outline">Step 3 · Review</span>
         </div>
       </header>
       <form id="case-session-form" class="form-grid" autocomplete="off">
@@ -180,7 +229,10 @@
           <h2>Interactive control rooms</h2>
           <p class="section-subtitle">Monitor live progress, thresholds, and handoffs across every active session.</p>
         </div>
-        <button type="button" class="btn-tertiary" id="refresh-case-sessions">Refresh</button>
+        <div class="section-actions">
+          <span class="pill pill--muted" id="session-last-refresh">Just now</span>
+          <button type="button" class="btn-tertiary" id="refresh-case-sessions">Refresh</button>
+        </div>
       </header>
       <div id="case-session-list" class="cards-grid"></div>
     </section>
@@ -229,6 +281,9 @@
       const sessionList = document.getElementById('case-session-list');
       const sourceRadios = form.querySelectorAll('input[name="case_source"]');
       const sourceGroups = form.querySelectorAll('[data-source-section]');
+      const quickButtons = document.querySelectorAll('[data-quickstart]');
+      const autoOpenToggle = document.getElementById('auto-open-workspace');
+      const lastRefresh = document.getElementById('session-last-refresh');
       const statusCopy = {
         running: 'Running',
         awaiting_decision: 'Awaiting decision',
@@ -244,12 +299,49 @@
         }
       }
 
+      const presets = {
+        dataset: () => {
+          form.elements['case_source'].value = 'dataset';
+          form.elements['cleaned_cases_path'].value = 'outputs/cleaned_cases.jsonl';
+          form.elements['case_index'].value = '0';
+          form.elements['success_threshold'].value = '0.80';
+          form.elements['max_iterations'].value = '6';
+          form.elements['persist_snapshots'].checked = true;
+        },
+        raw: () => {
+          form.elements['case_source'].value = 'raw';
+          const rawField = form.elements['raw_case_text'];
+          if (rawField) {
+            rawField.value = '（示例）原始案件文书/判决书文本，自动提取 CaseRecord。';
+          }
+          form.elements['success_threshold'].value = '0.80';
+          form.elements['max_iterations'].value = '4';
+          form.elements['persist_snapshots'].checked = true;
+        },
+        live: () => {
+          form.elements['case_source'].value = 'live';
+          form.elements['seed_title'].value = '现场快报演示';
+          form.elements['seed_summary'].value = '巡逻民警报告一起轻伤案件，等待取证与初步笔录。';
+          form.elements['seed_charges'].value = '故意伤害\n非法拘禁';
+          form.elements['seed_people'].value = '警员 Zhang\n目击者 Li';
+          form.elements['seed_location'].value = 'Pudong';
+          form.elements['success_threshold'].value = '0.75';
+          form.elements['max_iterations'].value = '5';
+        },
+      };
+
       function setMessage(text, tone = 'info') {
         if (!message) {
           return;
         }
         message.textContent = text || '';
         message.dataset.tone = tone;
+      }
+
+      function touchLastRefresh(label = 'Just now') {
+        if (lastRefresh) {
+          lastRefresh.textContent = label;
+        }
       }
 
       function updateSourceVisibility() {
@@ -407,19 +499,35 @@
           });
       }
 
-      async function refreshSessions() {
+      function maybeOpenWorkspace(sessionId) {
+        if (!sessionId) {
+          return;
+        }
+        if (autoOpenToggle && autoOpenToggle.checked) {
+          const url = `/interactive/${sessionId}`;
+          window.open(url, '_blank', 'noopener');
+        }
+      }
+
+      async function refreshSessions(showMessage = true) {
         if (!caseSessionsSection) {
           return;
         }
         try {
-          setMessage('Refreshing interactive sessions…');
+          if (showMessage) {
+            setMessage('Refreshing interactive sessions…');
+          }
           const response = await fetch('/api/interactive-sessions');
           if (!response.ok) {
             throw new Error('Failed to refresh sessions');
           }
           sessions = await response.json();
           renderSessions();
-          setMessage('Interactive sessions are up to date.', 'success');
+          const stamp = new Date();
+          touchLastRefresh(`Updated ${stamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+          if (showMessage) {
+            setMessage('Interactive sessions are up to date.', 'success');
+          }
         } catch (error) {
           setMessage('Unable to refresh interactive sessions.', 'error');
         }
@@ -428,6 +536,17 @@
       function attachEvents() {
         sourceRadios.forEach((radio) => {
           radio.addEventListener('change', updateSourceVisibility);
+        });
+
+        quickButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            const preset = button.dataset.quickstart;
+            if (presets[preset]) {
+              presets[preset]();
+              updateSourceVisibility();
+              setMessage(`Preset “${preset}” applied. Adjust fields if needed, then launch.`, 'info');
+            }
+          });
         });
 
         form.addEventListener('submit', async (event) => {
@@ -452,15 +571,16 @@
               sessions = [data.state].concat(sessions.filter((item) => item.session_id !== data.session_id));
               renderSessions();
             } else {
-              refreshSessions();
+              refreshSessions(false);
             }
+            maybeOpenWorkspace(data.session_id);
           } catch (error) {
             setMessage(error.message, 'error');
           }
         });
 
         if (refreshButton) {
-          refreshButton.addEventListener('click', refreshSessions);
+          refreshButton.addEventListener('click', () => refreshSessions(true));
         }
       }
 

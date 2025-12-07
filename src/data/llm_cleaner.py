@@ -1,4 +1,4 @@
-"""LLM-assisted cleaner for transforming raw court documents into CaseRecord objects."""
+"""LLM-assisted cleaner for transforming raw case documents into CaseRecord objects."""
 
 from __future__ import annotations
 
@@ -54,37 +54,37 @@ class LLMCaseCleaner:
             {
                 "case_id": "案件编号字符串",
                 "title": "标题或主旨",
-                "court": "审理法院名称",
-                "case_type": "文书类型，例如刑事判决书",
+                "court": "承办/审理机关名称（如公安/检察/法院）",
+                "case_type": "文书类型（如刑事判决书/起诉意见书），供对照",
                 "charges": ["罪名列表"],
-                "proceedings_summary": "开头摘要",
-                "factual_findings": "查明的事实段落",
-                "judgment": "判决结果文本",
+                "proceedings_summary": "开头摘要/接警与立案概况",
+                "factual_findings": "侦查阶段查明的事实摘要（避免法庭口吻）",
+                "judgment": "终局裁判/处理结果（若有，供对照）",
                 "participants": [
                     {
                         "name": "人物姓名",
-                        "role": "在案角色，如被告人/被害人/检察机关",
+                        "role": "在案角色，如被告人/被害人/检察机关/侦办民警",
                         "attributes": {"可选属性": "值"},
                     }
                 ],
                 "timeline": [
                     {
                         "timestamp": "YYYY年M月D日",
-                        "description": "事件描述",
-                        "source": "原文来源，缺省写判决书",
+                        "description": "事件或侦查行动描述",
+                        "source": "原文来源，缺省写案件文书",
                     }
                 ],
                 "evidence": [
                     {
                         "evidence_id": "稳定编号",
-                        "evidence_type": "证据类型，如证人证言",
-                        "summary": "摘要",
+                        "evidence_type": "证据类型，如证人证言/鉴定/物证",
+                        "summary": "摘要（突出指向性与缺口）",
                         "source_excerpt": "原文摘录",
                         "credibility": 0.8,
                     }
                 ],
-                "legal_basis": ["引用法条"],
-                "sentence_outcomes": ["量刑结果"],
+                "legal_basis": ["引用法条（可留空，用于对照）"],
+                "sentence_outcomes": ["量刑结果或处理决定（若有）"],
                 "raw_text": "保持原文或高密度摘录",
             },
             ensure_ascii=False,
@@ -92,10 +92,10 @@ class LLMCaseCleaner:
         )
 
     SYSTEM_PROMPT = (
-        "你是一名资深司法信息抽取助手。请阅读提供的裁判文书原文，"
-        "按要求输出结构化 JSON。必须返回合法 JSON 对象，使用双引号包装键与字符串值，"
-        "不得输出额外文本、注释、代码块或中文标点的引号。缺失信息请留空字符串或空数组，"
-        "禁止杜撰。"
+        "你是一名资深刑侦信息抽取助手。请阅读提供的案件文书（可能是判决书/起诉意见书等），"
+        "按要求输出结构化 JSON，重点还原侦查阶段的事实、行动与证据链。必须返回合法 JSON 对象，"
+        "使用双引号包装键与字符串值，不得输出额外文本、注释、代码块或中文标点的引号。"
+        "缺失信息请留空字符串或空数组，禁止杜撰。"
     )
 
     def build_prompt(self, raw_entry: Dict[str, Any], previous_error: Optional[str] = None) -> str:
